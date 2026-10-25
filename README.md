@@ -9,6 +9,8 @@
 - **白名单**：不在名单里的会话根本进不来
 - **换 bot 不用重启**：改 token，下一次轮询自动切过去
 
+> 还没发布到 npm，所以 Coopanion 的扩展市场里搜不到。用下面的脚本或命令安装。
+
 ## 它长什么样
 
 在 Coopanion 的设置里是一个「Telegram 机器人」配置块：
@@ -40,15 +42,21 @@
 
 ### 2. 装进 Coopanion
 
-把本仓库放到一个**不会移动**的目录，然后在 Coopanion 的扩展目录里链过去：
+**方法 A：一键脚本（Windows，推荐）**
+
+1. 点 GitHub 的 **Code → Download ZIP**，解压到一个以后不会移动的目录
+2. 双击里面的 **`install.bat`**（没有 pnpm 的话先 `npm install -g pnpm`）
+3. 脚本会自己找到 Coopanion 的数据目录、沿用它的 pnpm store，把本扩展链过去
+
+**方法 B：手动命令**
 
 ```powershell
 # <data> 是 Coopanion 的数据目录，见 %LOCALAPPDATA%\Coopanion\data-location.json 里的 "data"
 cd "<data>\extensions"
-pnpm add link:"<本仓库的绝对路径>"
+pnpm add link:"<本仓库的绝对路径>" --store-dir "<data>\pnpm\store\v11"
 ```
 
-> 想改成拷贝安装，把 `link:` 换成 `file:`。`link:` 的好处是改代码即时生效（重启后），
+> 想改成拷贝安装，把 `link:` 换成 `file:`。`link:` 的好处是改代码重启即生效，
 > 代价是这个目录以后不能移动。
 
 ### 3. 重启并配置
@@ -85,6 +93,7 @@ pnpm add link:"<本仓库的绝对路径>"
 | 现象 | 先看 |
 | --- | --- |
 | 设置页里没有这一块 | 扩展是否装进了 `<data>\extensions`，然后重启 |
+| `install.bat` 一闪而过 | 从 PowerShell 里跑 `install.ps1` 看报错 |
 | 日志里 `getMe 失败` | token 是否完整、网络能否到 `api.telegram.org`（国内要代理） |
 | `409 conflict` | 同一个 bot 被别处也在长轮询，关掉另一个 |
 | 收不到消息 | 白名单是否漏了你的 id；朋友的号是否被「只听主人」挡了 |
