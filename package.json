@@ -7,11 +7,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/BigFatWhale/cortico-world-telegram.git"
+    "url": "https://github.com/BigFatFish4Wm/cortico-world-telegram.git"
   },
-  "homepage": "https://github.com/BigFatWhale/cortico-world-telegram#readme",
+  "homepage": "https://github.com/BigFatFish4Wm/cortico-world-telegram#readme",
   "bugs": {
-    "url": "https://github.com/BigFatWhale/cortico-world-telegram/issues"
+    "url": "https://github.com/BigFatFish4Wm/cortico-world-telegram/issues"
   },
   "engines": {
     "node": ">=22"
@@ -24,7 +24,9 @@
     "index.js",
     "describe.json",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "install.ps1",
+    "install.bat"
   ],
   "keywords": [
     "cortico-world",
