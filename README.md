@@ -51,10 +51,20 @@
 **方法 B：手动命令**
 
 ```powershell
-# <data> 是 Coopanion 的数据目录，见 %LOCALAPPDATA%\Coopanion\data-location.json 里的 "data"
+# <data> 是 Coopanion 的数据目录：%LOCALAPPDATA%\Coopanion\data-location.json 里的 "data"
+# （每个人的安装位置不同，不要照抄；install.bat 会自动读这个文件）
 cd "<data>\extensions"
-pnpm add link:"<本仓库的绝对路径>" --store-dir "<data>\pnpm\store\v11"
+pnpm add link:"<本仓库的绝对路径>"
 ```
+
+如果 pnpm 报 `ERR_PNPM_UNEXPECTED_STORE`，说明它想用的包仓库和 Coopanion 用的不是同一个。看一眼
+`<data>\extensions\node_modules\.modules.yaml` 里的 `storeDir`，再加到命令后面：
+
+```powershell
+pnpm add link:"<本仓库的绝对路径>" --store-dir "<storeDir>"
+```
+
+（`install.bat` 会自动读这个 `storeDir`，所以推荐用它。）
 
 > 想改成拷贝安装，把 `link:` 换成 `file:`。`link:` 的好处是改代码重启即生效，
 > 代价是这个目录以后不能移动。
