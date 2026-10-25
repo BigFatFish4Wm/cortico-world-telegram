@@ -1,0 +1,31 @@
+{
+  "tools": [
+    {
+      "name": "tg_send",
+      "description": "Send one line to the person on Telegram, through the bot this pet is connected to. With no chatId it answers the chat that last wrote to you.",
+      "tags": ["speak"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "maxLength": 4000, "description": "What to send." },
+          "chatId": { "type": "string", "description": "Optional. The chat to send to; defaults to the last one that wrote." }
+        },
+        "required": ["text"]
+      },
+      "summary": {
+        "zh": "通过 Telegram bot 给人发一句话。",
+        "en": "Send one line to the person on Telegram."
+      }
+    }
+  ],
+  "events": [
+    {
+      "type": "telegram.message",
+      "description": {
+        "zh": "人在 Telegram 上发来的一条消息（只来自 allow 名单里的会话）。",
+        "en": "One message the person sent on Telegram, from an allow-listed chat only."
+      },
+      "trigger": "flush"
+    }
+  ]
+}

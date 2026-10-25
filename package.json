@@ -1,0 +1,48 @@
+{
+  "name": "cortico-world-telegram",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Cortico / Coopanion World: talk to your desktop pet through a Telegram bot (official Bot API, long polling). Owner-only commands, allow-listed chats, no webhook or public port.",
+  "author": "BigFatWhale",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BigFatWhale/cortico-world-telegram.git"
+  },
+  "homepage": "https://github.com/BigFatWhale/cortico-world-telegram#readme",
+  "bugs": {
+    "url": "https://github.com/BigFatWhale/cortico-world-telegram/issues"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "describe.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "cortico-world",
+    "cortico",
+    "coopanion",
+    "telegram",
+    "telegram-bot",
+    "im",
+    "desktop-pet"
+  ],
+  "cortico": {
+    "kind": "world",
+    "api": 6,
+    "displayName": "Telegram",
+    "describe": "describe.json",
+    "tags": [
+      "im",
+      "external-setup"
+    ]
+  }
+}
