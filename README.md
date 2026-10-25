@@ -1,0 +1,105 @@
+# cortico-world-telegram
+
+让 [Coopanion](https://github.com/Pal-AI-Lab/Cortico) 桌宠通过 **Telegram 官方 Bot API** 和你说话。
+不开放端口、不配置 webhook、不需要公网 IP：扩展自己长轮询 `getUpdates`。
+
+- **你在手机上发消息** → 变成宠物的一条事件
+- **宠物回复** → 通过 `tg_send` 发回你的 Telegram
+- **主人 / 朋友分得清**：只有你填的 chat id 算「狗修金」，别人的消息不会被当成你
+- **白名单**：不在名单里的会话根本进不来
+- **换 bot 不用重启**：改 token，下一次轮询自动切过去
+
+## 它长什么样
+
+在 Coopanion 的设置里是一个「Telegram 机器人」配置块：
+
+| 字段 | 作用 |
+| --- | --- |
+| 启用 | 暂停收 Telegram 消息（不影响发） |
+| Bot Token | BotFather 给的 token，保存后自动换 bot |
+| 主人会话 | 只有这里的 chat id 算你本人 |
+| 朋友能做什么 | 只听主人 / 朋友可聊天 / 朋友完全忽略 |
+| 白名单会话 | 允许说话的 chat id，群聊是负数 |
+| 默认回话会话 | 还没人发过消息时，`tg_send` 默认发到哪 |
+
+状态灯和 badge 会显示当前连的 `@bot`、收到和发出的条数。
+
+## 安装
+
+前置：Coopanion（Cortico 6.x）、Node ≥ 22、pnpm。
+
+### 1. 建 bot
+
+在 Telegram 里找 [@BotFather](https://t.me/BotFather)：
+
+```
+/newbot
+```
+
+按提示起名字、起一个以 `bot` 结尾的用户名，拿到一串 `123456:ABC...` 的 token。
+
+### 2. 装进 Coopanion
+
+把本仓库放到一个**不会移动**的目录，然后在 Coopanion 的扩展目录里链过去：
+
+```powershell
+# <data> 是 Coopanion 的数据目录，见 %LOCALAPPDATA%\Coopanion\data-location.json 里的 "data"
+cd "<data>\extensions"
+pnpm add link:"<本仓库的绝对路径>"
+```
+
+> 想改成拷贝安装，把 `link:` 换成 `file:`。`link:` 的好处是改代码即时生效（重启后），
+> 代价是这个目录以后不能移动。
+
+### 3. 重启并配置
+
+完全退出 Coopanion（含托盘）再打开，设置里会出现「Telegram 机器人」：
+
+1. 填 **Bot Token**
+2. 在 Telegram 给这个 bot 发一句 `/id`，它会把你的 chat id 回给你
+3. 把那个 id 填进 **主人会话**
+4. 想加朋友就填进 **白名单会话**，朋友的号发 `/id` 也能自报家门
+
+重启后 bot 会先 `getMe` 连上，日志里能看到 `telegram: 已连上 @你的bot`。
+
+## Telegram 里的命令
+
+| 命令 | 谁能用 | 作用 |
+| --- | --- | --- |
+| `/id` | 任何人 | 回你当前会话的 chat id |
+| `/allow <id>` | 主人 | 加进白名单（写进 `telegram-allow.json`） |
+| `/deny <id>` | 主人 | 移出白名单 |
+| `/allowlist` | 主人 | 看当前白名单 |
+
+命令由扩展直接处理，不经过宠物，也不会变成对话事件。
+
+## 安全
+
+- **token 等于这个 bot 的钥匙**，只写在本机的 `config.json` 里，别提交、别贴群。
+- **白名单留空 = 谁都能发**。装好第一件事就是把主人 id 填上。
+- 朋友策略默认「只听主人」：朋友的指令会被回绝，宠物看不到；切到「朋友可聊天」才会进对话，但会标成 guest。
+- 只用官方 Bot API 的长轮询：不模拟个人号、不需要手机验证码，风控风险最低。
+
+## 排错
+
+| 现象 | 先看 |
+| --- | --- |
+| 设置页里没有这一块 | 扩展是否装进了 `<data>\extensions`，然后重启 |
+| 日志里 `getMe 失败` | token 是否完整、网络能否到 `api.telegram.org`（国内要代理） |
+| `409 conflict` | 同一个 bot 被别处也在长轮询，关掉另一个 |
+| 收不到消息 | 白名单是否漏了你的 id；朋友的号是否被「只听主人」挡了 |
+| 发出去了但没回复 | 宠物是否被打断 / 模型是否调用了 `tg_send` |
+
+日志在 `<data>\logs\core.log`，搜 `telegram`。
+
+## 开发
+
+```bash
+node test/run.mjs
+```
+
+测试会起一个假的 Bot API 服务，覆盖：收消息 → 事件、`tg_send` → sendMessage、`/id`、`/allow` 白名单、朋友被拒。
+
+## 许可
+
+MIT。这是社区扩展，与 Coopanion / Pal AI Lab / Telegram 官方无关。
