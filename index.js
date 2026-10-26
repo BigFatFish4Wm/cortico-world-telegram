@@ -28,6 +28,8 @@ const MIME_BY_EXT = {
 }
 const POLL_SECONDS = 25
 const RETRY_MS = 3000
+const DEFAULT_CONTINUITY = 3
+const DEFAULT_WINDOW_SEC = 120
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -79,6 +81,7 @@ export class TelegramWorld {
     this.state = 'offline'
     this.hint = ''
     this.botUsername = ''
+    this.botId = null
     this.lastChatId = null
     this.offset = 0
     this.abort = null
@@ -86,6 +89,13 @@ export class TelegramWorld {
     this.received = 0
     this.sent = 0
     this.activeToken = ''
+    /** Per (chat, person) continuity budgets; see `consumeContinuity`. */
+    this.continuity = new Map()
+    /** chatId → the person whose delivered message waits for the model's answer. */
+    this.pendingReply = new Map()
+    this.continuityFile = typeof options.ctx?.dataDir === 'string' && options.ctx.dataDir
+      ? path.join(options.ctx.dataDir, 'telegram-continuity.json')
+      : null
     this.configFile = this.findConfigFile()
     this.configCache = null
     this.configMtime = 0
@@ -187,6 +197,128 @@ export class TelegramWorld {
     return 'owner-only'
   }
 
+  /** In groups, deliver only a mention/reply and the continuity chain that follows it. */
+  get groupMentionOnly() {
+    return this.setting('groupMentionOnly', this.cfg.groupMentionOnly) === true
+  }
+
+  /** Continuity messages granted by one mention. */
+  get continuityCount() {
+    const value = Number(this.setting('continuityCount', this.cfg.continuityCount) || DEFAULT_CONTINUITY)
+    return Math.max(1, Math.min(20, Math.round(value)))
+  }
+
+  get continuityWindowMs() {
+    const value = Number(this.setting('continuityWindowSec', this.cfg.continuityWindowSec) || DEFAULT_WINDOW_SEC)
+    return Math.max(10, Math.min(3600, Math.round(value))) * 1000
+  }
+
+  continuityKey(chatId, fromId) {
+    return `${chatId}\u0000${fromId}`
+  }
+
+  loadContinuity() {
+    if (!this.continuityFile) return
+    try {
+      const parsed = JSON.parse(fs.readFileSync(this.continuityFile, 'utf8'))
+      for (const entry of Array.isArray(parsed?.entries) ? parsed.entries : []) {
+        if (entry?.key) this.continuity.set(entry.key, entry)
+      }
+    } catch {
+      // no file yet
+    }
+  }
+
+  saveContinuity() {
+    if (!this.continuityFile) return
+    try {
+      fs.writeFileSync(
+        this.continuityFile,
+        `${JSON.stringify({ entries: [...this.continuity.values()] }, null, 2)}\n`,
+        'utf8',
+      )
+    } catch {
+      // budgets survive in memory for this run
+    }
+  }
+
+  /** A mention starts (or restarts) the chain with the configured count. */
+  grantContinuity(chatId, fromId) {
+    if (fromId === null || fromId === undefined) return
+    const now = Date.now()
+    this.continuity.set(this.continuityKey(chatId, fromId), {
+      key: this.continuityKey(chatId, fromId),
+      chatId: String(chatId),
+      fromId: String(fromId),
+      n: this.continuityCount,
+      budget: this.continuityCount,
+      used: 0,
+      lastAt: now,
+    })
+    this.saveContinuity()
+  }
+
+  /** Takes one message from the chain; false when there is none (no mention, expired, used up). */
+  consumeContinuity(chatId, fromId) {
+    if (fromId === null || fromId === undefined) return false
+    const key = this.continuityKey(chatId, fromId)
+    const entry = this.continuity.get(key)
+    if (!entry) return false
+    const now = Date.now()
+    if (now - entry.lastAt > this.continuityWindowMs) {
+      this.continuity.delete(key)
+      this.saveContinuity()
+      return false
+    }
+    if (entry.budget <= 0) return false
+    entry.budget -= 1
+    entry.used += 1
+    entry.lastAt = now
+    this.saveContinuity()
+    return true
+  }
+
+  /**
+   * The model answered a message that came through the chain: it earns `n - used` more messages,
+   * and that grant becomes the new `n` (so the allowance decays instead of renewing forever).
+   */
+  noteOutbound(chatId) {
+    const key = String(chatId)
+    const pending = this.pendingReply.get(key)
+    if (!pending) return
+    this.pendingReply.delete(key)
+    if (Date.now() - pending.at > this.continuityWindowMs) return
+    const entry = this.continuity.get(this.continuityKey(key, pending.fromId))
+    if (!entry) return
+    const extra = Math.max(0, entry.n - entry.used)
+    entry.budget += extra
+    entry.n = extra
+    entry.used = 0
+    entry.lastAt = Date.now()
+    this.saveContinuity()
+  }
+
+  /** Did this message call the bot by name, or answer one of its messages? */
+  mentionsBot(message) {
+    const reply = message.reply_to_message
+    if (reply?.from) {
+      if (this.botId !== null && reply.from.id === this.botId) return true
+      if (this.botUsername && String(reply.from.username ?? '').toLowerCase() === this.botUsername.toLowerCase()) {
+        return true
+      }
+    }
+    const text = asText(message.text) || asText(message.caption)
+    const username = this.botUsername.toLowerCase()
+    for (const entity of Array.isArray(message.entities) ? message.entities : []) {
+      if (entity?.type === 'text_mention' && this.botId !== null && entity.user?.id === this.botId) return true
+      if (entity?.type === 'mention' && username) {
+        const slice = text.slice(entity.offset ?? 0, (entity.offset ?? 0) + (entity.length ?? 0))
+        if (slice.toLowerCase() === `@${username}`) return true
+      }
+    }
+    return Boolean(username) && text.toLowerCase().includes(`@${username}`)
+  }
+
   /** Additions and removals from `/allow` and `/deny`, kept beside the World's own data. */
   get overlayFile() {
     const dir = this.ctx?.dataDir
@@ -234,6 +366,7 @@ export class TelegramWorld {
         disable_web_page_preview: true,
       })
       this.sent += 1
+      this.noteOutbound(chatId)
       return true
     } catch (error) {
       this.host?.log.warn(`telegram: 回消息失败：${error.message}`)
@@ -286,6 +419,7 @@ export class TelegramWorld {
     this.running = true
     this.state = 'loading'
     this.loadChats()
+    this.loadContinuity()
 
     if (this.configFile) host.log.info(`telegram: 配置读取自 ${this.configFile}`)
     else host.log.warn('telegram: 找不到 config.json，只使用启动时的配置')
@@ -300,6 +434,7 @@ export class TelegramWorld {
     try {
       const me = await tgCall(this.token, this.apiBase, 'getMe', {})
       this.botUsername = asText(me?.username)
+      this.botId = typeof me?.id === 'number' ? me.id : null
       this.activeToken = this.token
       this.state = 'online'
       this.hint = this.botUsername ? `@${this.botUsername}` : 'online'
@@ -341,6 +476,7 @@ export class TelegramWorld {
       const me = await tgCall(token, this.apiBase, 'getMe', {})
       this.activeToken = token
       this.botUsername = asText(me?.username)
+      this.botId = typeof me?.id === 'number' ? me.id : null
       this.state = 'online'
       this.hint = this.botUsername ? `@${this.botUsername}` : 'online'
       this.host?.log.info(`telegram: 已切换到 ${this.hint}`)
@@ -441,6 +577,18 @@ export class TelegramWorld {
       }
       await this.adminCommand(command, words.slice(1).join(' '), chatId)
       return
+    }
+
+    const isGroup = chat.type === 'group' || chat.type === 'supergroup'
+    if (isGroup && this.groupMentionOnly) {
+      if (this.mentionsBot(message)) {
+        this.grantContinuity(chatId, fromId)
+      } else if (this.consumeContinuity(chatId, fromId)) {
+        this.pendingReply.set(chatId, { fromId, at: Date.now() })
+      } else {
+        this.host?.log.info(`telegram: 群里没被提及、连续性也用完了，跳过 ${chatId}/${fromId}`)
+        return
+      }
     }
 
     this.received += 1
@@ -702,6 +850,7 @@ export class TelegramWorld {
       throw new Error(`${method}: ${data?.description || `HTTP ${res.status}`}`)
     }
     this.sent += 1
+    this.noteOutbound(chatId)
     return `已发到 Telegram（${chatId}）：${photo.name}，${Math.round(photo.bytes.length / 1024)} KB${caption ? '，带说明' : ''}。`
   }
 
@@ -746,6 +895,7 @@ export class TelegramWorld {
               disable_web_page_preview: true,
             })
             this.sent += 1
+            this.noteOutbound(chatId)
             return `已发到 Telegram（${chatId}）。`
           } catch (error) {
             return `发送失败：${error.message}`
@@ -837,6 +987,25 @@ export class TelegramWorld {
                   'tg_send 只能从这里发图（绝对路径，多个用分号或换行分隔，支持 %USERPROFILE% 这类变量）。目录给到 tg_send 时会自动挑里面最新的一张。留空表示不许发图。',
                 'x-hot': true,
               },
+              [at('groupMentionOnly')]: {
+                type: 'boolean',
+                title: '群里只在被提及时收',
+                description:
+                  '开启后：群里只有 @ 这个 bot、或回复它的消息才会进对话；被提及后，同一个人接下来若干条可免提及继续说话。私聊不受影响。',
+                'x-hot': true,
+              },
+              [at('continuityCount')]: {
+                type: 'number',
+                title: '连续放行条数',
+                description: '一次提及后，同一个人最多能连续发几条（1–20）。模型在这期间回复的话，会按剩余额度补一批，额度逐次递减。',
+                'x-hot': true,
+              },
+              [at('continuityWindowSec')]: {
+                type: 'number',
+                title: '连续放行时间窗（秒）',
+                description: '超过这么多秒没说话，连续性就失效（10–3600），默认 120。',
+                'x-hot': true,
+              },
             },
           },
         },
@@ -888,6 +1057,9 @@ export const definition = {
     guestMode: '只听主人',
     allow: '',
     replyChat: '',
+    groupMentionOnly: false,
+    continuityCount: DEFAULT_CONTINUITY,
+    continuityWindowSec: DEFAULT_WINDOW_SEC,
     apiBase: DEFAULT_API_BASE,
   }),
   describe: DESCRIBE,
