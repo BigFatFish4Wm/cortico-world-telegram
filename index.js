@@ -416,7 +416,10 @@ export class TelegramWorld {
 
     this.rememberChat(chat, message.from, chat.type)
 
-    const owner = this.isOwner(chatId)
+    // In a group the chat id is the group, so the person speaking can only be recognised by
+    // their own user id. The owner is the owner in every chat they are allowed into.
+    const fromId = message.from?.id ?? null
+    const owner = this.isOwner(chatId) || (fromId !== null && this.isOwner(String(fromId)))
 
     if (!owner) {
       const mode = this.guestMode
@@ -442,7 +445,6 @@ export class TelegramWorld {
 
     this.received += 1
     this.lastChatId = chatId
-    const fromId = message.from?.id ?? null
     const who =
       [message.from?.first_name, message.from?.last_name].filter(Boolean).join(' ') ||
       message.from?.username ||
