@@ -263,6 +263,10 @@ server.pushUpdate({
   text: '群里冒个泡',
 })
 await waitFor(() => host.events.length === 4, 'group message')
+const groupEvent = host.events[3]
+assert.match(groupEvent.text, /\(id:424242\)/, 'group messages carry the sender id, not just a name')
+assert.equal(groupEvent.meta.fromId, 424242)
+assert.match(host.events[0].text, /\(id:424242\)/, 'private messages carry the id too')
 const sentBeforeChat = server.sent.length
 const chatReceipt = await sendTool.handler({ text: '来了', chat: '小窝' })
 assert.match(String(chatReceipt), /已发到 Telegram/)
@@ -284,10 +288,11 @@ server.pushUpdate({
 })
 await waitFor(() => host.events.length === 5, 'reply event')
 const replyEvent = host.events[4]
-assert.match(replyEvent.text, /「回复 BigFatFish：买到了」/)
+assert.match(replyEvent.text, /「回复 BigFatFish[(]id:1[)]：买到了」/)
 assert.match(replyEvent.text, /这条是回复/)
 assert.equal(replyEvent.meta.replyTo.name, 'BigFatFish')
 assert.equal(replyEvent.meta.replyTo.messageId, 11)
+assert.equal(replyEvent.meta.replyTo.fromId, 1)
 
 // photo: send a file inside the allowed directory
 const photoReceipt = await sendTool.handler({ text: '截图', photo: shotNew, chat: '小窝' })
