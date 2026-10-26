@@ -439,6 +439,7 @@ export class TelegramWorld {
         const bytes = await this.downloadMedia(media.fileId)
         if (bytes) {
           blobs = [{ bytes, mime: media.mime, name: media.name, fallbackText: media.fallback }]
+          this.host?.log.info(`telegram: 附件 ${media.fallback} 已下载，${bytes.length} 字节（${media.mime}）`)
         }
       } catch (error) {
         this.host?.log.warn(`telegram: 下载${media.fallback}失败：${error.message}`)
