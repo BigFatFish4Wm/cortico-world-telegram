@@ -14,6 +14,7 @@ import path from 'node:path'
 const WORLD_ID = 'telegram'
 const DEFAULT_API_BASE = 'https://api.telegram.org'
 const MAX_TEXT = 4000
+const MAX_MEDIA_BYTES = 10 * 1024 * 1024
 const POLL_SECONDS = 25
 const RETRY_MS = 3000
 
@@ -379,7 +380,8 @@ export class TelegramWorld {
     if (!chat) return
     if (message.from?.is_bot) return
     const text = (asText(message.text) || asText(message.caption)).trim()
-    if (!text) return
+    const media = this.mediaOf(message)
+    if (!text && !media) return
 
     const chatId = String(chat.id)
     const words = text.split(/\s+/)
@@ -429,7 +431,24 @@ export class TelegramWorld {
       chat.type === 'private' ? '私聊' : chat.type === 'group' || chat.type === 'supergroup' ? '群聊' : chat.type
     const role = owner ? '主人' : '朋友，不是主人'
 
-    this.host?.log.info(`telegram: 收到 ${kind} ${who}（${chatId}，${role}）：${text.slice(0, 40)}`)
+    let blobs
+    let label = ''
+    if (media) {
+      label = media.fallback
+      try {
+        const bytes = await this.downloadMedia(media.fileId)
+        if (bytes) {
+          blobs = [{ bytes, mime: media.mime, name: media.name, fallbackText: media.fallback }]
+        }
+      } catch (error) {
+        this.host?.log.warn(`telegram: 下载${media.fallback}失败：${error.message}`)
+      }
+    }
+    const body = [label, text].filter(Boolean).join(' ')
+
+    this.host?.log.info(
+      `telegram: 收到 ${kind} ${who}（${chatId}，${role}）：${(text || label).slice(0, 40)}`,
+    )
 
     await this.host?.pushEvent(
       {
@@ -437,7 +456,7 @@ export class TelegramWorld {
         source: WORLD_ID,
         ts: new Date().toISOString(),
         origin: 'external',
-        text: `【Telegram ${kind} ${who}（${role}）】${text}`,
+        text: `【Telegram ${kind} ${who}（${role}）】${body}`,
         senderKey: chatId,
         meta: {
           chatId,
@@ -445,10 +464,65 @@ export class TelegramWorld {
           fromId: message.from?.id ?? null,
           fromName: who,
           role: owner ? 'owner' : 'guest',
+          hasMedia: Boolean(media),
         },
+        blobs,
       },
       { trigger: 'flush' },
     )
+  }
+
+  /** The one image-like attachment a Telegram message carries, if any. */
+  mediaOf(message) {
+    const photo = Array.isArray(message.photo) ? message.photo.at(-1) : null
+    if (photo?.file_id) {
+      return { fileId: photo.file_id, mime: 'image/jpeg', name: 'telegram-photo.jpg', fallback: '[图片]' }
+    }
+
+    const sticker = message.sticker
+    if (sticker) {
+      const thumb = sticker.thumbnail
+      if (thumb?.file_id) {
+        return { fileId: thumb.file_id, mime: 'image/jpeg', name: 'telegram-sticker-thumb.jpg', fallback: '[贴纸]' }
+      }
+      if (sticker.file_id && !sticker.is_animated && !sticker.is_video) {
+        return { fileId: sticker.file_id, mime: 'image/webp', name: 'telegram-sticker.webp', fallback: '[贴纸]' }
+      }
+      return sticker.file_id
+        ? { fileId: sticker.file_id, mime: 'application/octet-stream', name: 'telegram-sticker', fallback: '[贴纸]' }
+        : null
+    }
+
+    const doc = message.document
+    if (doc?.file_id && asText(doc.mime_type).startsWith('image/')) {
+      return { fileId: doc.file_id, mime: doc.mime_type, name: doc.file_name || 'telegram-image', fallback: '[图片]' }
+    }
+
+    const animation = message.animation
+    if (animation?.thumbnail?.file_id) {
+      return { fileId: animation.thumbnail.file_id, mime: 'image/jpeg', name: 'telegram-animation-thumb.jpg', fallback: '[动图]' }
+    }
+
+    return null
+  }
+
+  /** Bot API caps downloads at 20 MB; anything past our own cap is skipped rather than trimmed. */
+  async downloadMedia(fileId) {
+    const file = await tgCall(this.token, this.apiBase, 'getFile', { file_id: fileId }, undefined, 20000)
+    const filePath = asText(file?.file_path)
+    if (!filePath) return null
+    const size = Number(file?.file_size ?? 0)
+    if (size > MAX_MEDIA_BYTES) {
+      this.host?.log.warn(`telegram: 附件 ${size} 字节，超过上限 ${MAX_MEDIA_BYTES}，跳过`)
+      return null
+    }
+    const res = await fetch(`${this.apiBase}/file/bot${this.token}/${filePath}`, {
+      signal: AbortSignal.timeout(30000),
+    })
+    if (!res.ok) throw new Error(`下载附件失败：HTTP ${res.status}`)
+    const bytes = Buffer.from(await res.arrayBuffer())
+    if (bytes.length > MAX_MEDIA_BYTES) return null
+    return bytes
   }
 
   tools() {
