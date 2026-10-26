@@ -290,7 +290,7 @@ export class TelegramWorld {
     if (Date.now() - pending.at > this.continuityWindowMs) return
     const entry = this.continuity.get(this.continuityKey(key, pending.fromId))
     if (!entry) return
-    const extra = Math.max(0, entry.n - entry.used)
+    const extra = Math.max(1, entry.n - entry.used)
     entry.budget += extra
     entry.n = extra
     entry.used = 0
@@ -298,7 +298,15 @@ export class TelegramWorld {
     this.saveContinuity()
   }
 
-  /** Did this message call the bot by name, or answer one of its messages? */
+  /** Extra words that count as a mention of the bot (a nickname, a pet name, …). */
+  get mentionKeywords() {
+    return String(this.setting('mentionKeywords', this.cfg.mentionKeywords) ?? '')
+      .split(/[,，;；\s]+/)
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean)
+  }
+
+  /** Did this message call the bot by name, by keyword, or answer one of its messages? */
   mentionsBot(message) {
     const reply = message.reply_to_message
     if (reply?.from) {
@@ -316,7 +324,9 @@ export class TelegramWorld {
         if (slice.toLowerCase() === `@${username}`) return true
       }
     }
-    return Boolean(username) && text.toLowerCase().includes(`@${username}`)
+    const lower = text.toLowerCase()
+    if (username && lower.includes(`@${username}`)) return true
+    return this.mentionKeywords.some((word) => lower.includes(word))
   }
 
   /** Additions and removals from `/allow` and `/deny`, kept beside the World's own data. */
@@ -991,7 +1001,13 @@ export class TelegramWorld {
                 type: 'boolean',
                 title: '群里只在被提及时收',
                 description:
-                  '开启后：群里只有 @ 这个 bot、或回复它的消息才会进对话；被提及后，同一个人接下来若干条可免提及继续说话。私聊不受影响。',
+                  '开启后：群里只有 @ 这个 bot、回复它的消息、或正文里出现关键词时才会进对话；被提及后，同一个人接下来若干条可免提及继续说话。私聊不受影响。',
+                'x-hot': true,
+              },
+              [at('mentionKeywords')]: {
+                type: 'string',
+                title: '关键词提及',
+                description: '正文里出现这些词就算 @ 了（逗号或空格分隔），比如「大肥鱼、肥鱼」。留空表示只认 @ 和回复。',
                 'x-hot': true,
               },
               [at('continuityCount')]: {
@@ -1058,6 +1074,7 @@ export const definition = {
     allow: '',
     replyChat: '',
     groupMentionOnly: false,
+    mentionKeywords: '',
     continuityCount: DEFAULT_CONTINUITY,
     continuityWindowSec: DEFAULT_WINDOW_SEC,
     apiBase: DEFAULT_API_BASE,
