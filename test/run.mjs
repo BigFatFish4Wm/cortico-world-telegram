@@ -364,6 +364,84 @@ assert.equal(host2.events.length, 0, 'guest command never reaches the pet')
 await world2.stop()
 server2.close()
 
+// groups with the mention rule: only a mention starts a chain, and a model reply refills it
+const server3 = await startFakeTelegram()
+const apiBase3 = `http://127.0.0.1:${server3.address().port}`
+const world3 = new TelegramWorld({
+  cfg: {
+    enabled: true,
+    token: TOKEN,
+    owner: CHAT_ID,
+    guestMode: '朋友可聊天',
+    allow: `${CHAT_ID} ${GROUP_ID}`,
+    replyChat: '',
+    photoDirs: shotsDir,
+    groupMentionOnly: true,
+    continuityCount: 3,
+    continuityWindowSec: 60,
+    apiBase: apiBase3,
+  },
+  ctx: { dataDir },
+})
+const host3 = fakeHost()
+await world3.start(host3)
+
+let seq = 40
+const sendGroup = (from, text, extra = {}) => {
+  server3.pushUpdate({
+    message_id: seq++,
+    from: { id: from, is_bot: false, first_name: `u${from}` },
+    chat: { id: Number(GROUP_ID), type: 'supergroup', title: '小窝' },
+    date: 1700000100 + seq,
+    text,
+    ...extra,
+  })
+}
+const events3 = () => host3.events.length
+const waitEvents = (n, label) => waitFor(() => events3() === n, label)
+
+// a reply to the bot's own message starts the chain
+sendGroup(777, '在吗', {
+  reply_to_message: { message_id: 1, from: { id: 1, is_bot: true, username: 'coo_test_bot' }, text: '嗯？' },
+})
+await waitEvents(1, 'mention starts the chain')
+
+// two free messages consume the budget
+sendGroup(777, '1')
+await waitEvents(2, 'continuity 1')
+sendGroup(777, '2')
+await waitEvents(3, 'continuity 2')
+
+// the model answered: extra = n(3) - used(2) = 1, so the budget goes back to 2 and n becomes 1
+const reply = await world3.tools()[0].handler({ text: '回一句', chatId: GROUP_ID })
+assert.match(String(reply), /已发到 Telegram/)
+
+sendGroup(777, '3')
+await waitEvents(4, 'refilled continuity')
+sendGroup(777, '4')
+await waitEvents(5, 'continuity exhausted')
+
+// answering again earns max(0, n(1) - used(2)) = 0
+await world3.tools()[0].handler({ text: '再回一句', chatId: GROUP_ID })
+
+sendGroup(777, '5')
+await new Promise((resolve) => setTimeout(resolve, 150))
+assert.equal(events3(), 5, 'no budget left: the message never reaches the pet')
+
+// a stranger without a chain is dropped too
+sendGroup(888, '我也是朋友')
+await new Promise((resolve) => setTimeout(resolve, 150))
+assert.equal(events3(), 5, 'a non-mentioned stranger is dropped')
+
+// a fresh mention opens the chain again
+sendGroup(777, '@coo_test_bot 我回来了')
+await waitEvents(6, 'mention reopens the chain')
+sendGroup(777, '这次能收到吗')
+await waitEvents(7, 'continuity after the second mention')
+
+await world3.stop()
+server3.close()
+
 // an empty token never reaches the network
 const offline = new TelegramWorld({ cfg: { token: '' } })
 await offline.start(fakeHost())
