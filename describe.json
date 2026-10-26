@@ -2,19 +2,20 @@
   "tools": [
     {
       "name": "tg_send",
-      "description": "Send one line to the person on Telegram, through the bot this pet is connected to. With no chatId it answers the chat that last wrote to you.",
+      "description": "Send a line, or one local image, to a Telegram chat through this bot. photo must be inside an allowed directory; a directory means the newest image inside it. chatId/chat picks the target, blank means the chat that last wrote.",
       "tags": ["speak"],
       "parameters": {
         "type": "object",
         "properties": {
-          "text": { "type": "string", "maxLength": 4000, "description": "What to send." },
-          "chatId": { "type": "string", "description": "Optional. The chat to send to; defaults to the last one that wrote." }
-        },
-        "required": ["text"]
+          "text": { "type": "string", "maxLength": 4000, "description": "Text to send, or the caption when photo is set." },
+          "photo": { "type": "string", "maxLength": 512, "description": "Absolute path of an image file or a directory (the newest image inside is used)." },
+          "chatId": { "type": "string", "maxLength": 64, "description": "Optional chat id, \"last\", or part of a chat title." },
+          "chat": { "type": "string", "maxLength": 64, "description": "Optional chat title such as 小窝." }
+        }
       },
       "summary": {
-        "zh": "通过 Telegram bot 给人发一句话。",
-        "en": "Send one line to the person on Telegram."
+        "zh": "通过 Telegram bot 发一句话，或一张本机图片（限允许的目录）。",
+        "en": "Send a line, or one local image from an allowed directory, on Telegram."
       }
     }
   ],
