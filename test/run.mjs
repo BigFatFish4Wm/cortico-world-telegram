@@ -20,6 +20,11 @@ function startFakeTelegram() {
   const receivedPaths = []
 
   const server = http.createServer((req, res) => {
+    if (req.url.startsWith('/file/bot')) {
+      res.setHeader('content-type', 'image/jpeg')
+      res.end(Buffer.from([0xff, 0xd8, 0xff, 0xd9]))
+      return
+    }
     let body = ''
     req.on('data', (chunk) => (body += chunk))
     req.on('end', () => {
@@ -30,6 +35,10 @@ function startFakeTelegram() {
 
       if (method === 'getMe') {
         res.end(JSON.stringify({ ok: true, result: { id: 1, is_bot: true, username: 'coo_test_bot' } }))
+        return
+      }
+      if (method === 'getFile') {
+        res.end(JSON.stringify({ ok: true, result: { file_id: payload.file_id, file_size: 4, file_path: 'photos/1.jpg' } }))
         return
       }
       if (method === 'getUpdates') {
@@ -205,6 +214,28 @@ server.pushUpdate({
 })
 await waitFor(() => server.sent.at(-1)?.text?.includes('只有主人的账号'), 'guest admin refused')
 assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dataDir, 'telegram-allow.json'), 'utf8')), { added: ['777'], removed: [] })
+
+// a photo becomes one event with the image bytes attached
+server.pushUpdate({
+  message_id: 18,
+  from: { id: Number(CHAT_ID), is_bot: false, first_name: 'Jim' },
+  chat: { id: Number(CHAT_ID), type: 'private' },
+  date: 1700000007,
+  photo: [
+    { file_id: 'small', file_unique_id: 'u1', width: 90, height: 90, file_size: 4 },
+    { file_id: 'big', file_unique_id: 'u2', width: 800, height: 800, file_size: 4 },
+  ],
+  caption: '看这个',
+})
+await waitFor(() => host.events.length === 3, 'photo event')
+const photoEvent = host.events[2]
+assert.match(photoEvent.text, /\[图片\]/)
+assert.match(photoEvent.text, /看这个/)
+assert.equal(photoEvent.meta.hasMedia, true)
+assert.equal(photoEvent.blobs.length, 1)
+assert.equal(photoEvent.blobs[0].mime, 'image/jpeg')
+assert.equal(photoEvent.blobs[0].bytes.length, 4)
+assert.equal(photoEvent.blobs[0].fallbackText, '[图片]')
 
 // default policy: a guest that is allowed may not command the pet at all
 await world.stop()
