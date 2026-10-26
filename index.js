@@ -465,9 +465,11 @@ export class TelegramWorld {
       }
     }
     const body = [label, text].filter(Boolean).join(' ')
+    const quoted = this.quoteOf(message.reply_to_message)
+    const quote = quoted ? `「回复 ${quoted.name}：${quoted.text}」` : ''
 
     this.host?.log.info(
-      `telegram: 收到 ${kind} ${who}（${chatId}，${role}）：${(text || label).slice(0, 40)}`,
+      `telegram: 收到 ${kind} ${who}（${chatId}，${role}）${quoted ? ' [回复]' : ''}：${(text || label).slice(0, 40)}`,
     )
 
     await this.host?.pushEvent(
@@ -476,7 +478,7 @@ export class TelegramWorld {
         source: WORLD_ID,
         ts: new Date().toISOString(),
         origin: 'external',
-        text: `【Telegram ${kind} ${who}（${role}）】${body}`,
+        text: `【Telegram ${kind} ${who}（${role}）】${quote}${body}`,
         senderKey: chatId,
         meta: {
           chatId,
@@ -485,11 +487,31 @@ export class TelegramWorld {
           fromName: who,
           role: owner ? 'owner' : 'guest',
           hasMedia: Boolean(media),
+          replyTo: quoted ?? undefined,
         },
         blobs,
       },
       { trigger: 'flush' },
     )
+  }
+
+  /** What a `reply_to_message` points at: who wrote it and the start of what it said. */
+  quoteOf(reply) {
+    if (!reply) return null
+    const name =
+      [reply.from?.first_name, reply.from?.last_name].filter(Boolean).join(' ') ||
+      reply.from?.username ||
+      '未知'
+    const raw =
+      asText(reply.text) ||
+      asText(reply.caption) ||
+      (reply.photo ? '[图片]' : '') ||
+      (reply.sticker ? '[贴纸]' : '') ||
+      (reply.document ? '[文件]' : '') ||
+      (reply.voice ? '[语音]' : '') ||
+      (reply.animation ? '[动图]' : '')
+    const text = raw.replace(/\s+/g, ' ').trim().slice(0, 120) || '[消息]'
+    return { messageId: reply.message_id ?? null, name, text }
   }
 
   /** The one image-like attachment a Telegram message carries, if any. */
