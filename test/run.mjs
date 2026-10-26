@@ -377,6 +377,7 @@ const world3 = new TelegramWorld({
     replyChat: '',
     photoDirs: shotsDir,
     groupMentionOnly: true,
+    mentionKeywords: '大肥鱼',
     continuityCount: 3,
     continuityWindowSec: 60,
     apiBase: apiBase3,
@@ -421,23 +422,31 @@ await waitEvents(4, 'refilled continuity')
 sendGroup(777, '4')
 await waitEvents(5, 'continuity exhausted')
 
-// answering again earns max(0, n(1) - used(2)) = 0
+// answering again keeps a floor of one: max(1, n(1) - used(2)) = 1
 await world3.tools()[0].handler({ text: '再回一句', chatId: GROUP_ID })
 
 sendGroup(777, '5')
+await waitEvents(6, 'floor keeps one more message')
+sendGroup(777, '6')
 await new Promise((resolve) => setTimeout(resolve, 150))
-assert.equal(events3(), 5, 'no budget left: the message never reaches the pet')
+assert.equal(events3(), 6, 'the floor is spent once, then the chain ends')
 
 // a stranger without a chain is dropped too
 sendGroup(888, '我也是朋友')
 await new Promise((resolve) => setTimeout(resolve, 150))
-assert.equal(events3(), 5, 'a non-mentioned stranger is dropped')
+assert.equal(events3(), 6, 'a non-mentioned stranger is dropped')
 
-// a fresh mention opens the chain again
+// a keyword counts as a mention, and opens a chain for that person
+sendGroup(999, '大肥鱼在吗')
+await waitEvents(7, 'keyword mention')
+sendGroup(999, '那我说第二句')
+await waitEvents(8, 'chain from the keyword')
+
+// an @ still works, and resets the chain
 sendGroup(777, '@coo_test_bot 我回来了')
-await waitEvents(6, 'mention reopens the chain')
+await waitEvents(9, 'mention reopens the chain')
 sendGroup(777, '这次能收到吗')
-await waitEvents(7, 'continuity after the second mention')
+await waitEvents(10, 'continuity after the second mention')
 
 await world3.stop()
 server3.close()
