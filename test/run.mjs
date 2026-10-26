@@ -25,13 +25,21 @@ function startFakeTelegram() {
       res.end(Buffer.from([0xff, 0xd8, 0xff, 0xd9]))
       return
     }
-    let body = ''
-    req.on('data', (chunk) => (body += chunk))
+    const chunks = []
+    req.on('data', (chunk) => chunks.push(chunk))
     req.on('end', () => {
+      const raw = Buffer.concat(chunks)
       const method = req.url.split('/').pop()
       receivedPaths.push(method)
-      const payload = body ? JSON.parse(body) : {}
       res.setHeader('content-type', 'application/json')
+
+      if (method === 'sendPhoto' || method === 'sendDocument') {
+        sent.push({ method, raw, contentType: req.headers['content-type'] })
+        res.end(JSON.stringify({ ok: true, result: { message_id: 900 + sent.length } }))
+        return
+      }
+
+      const payload = raw.length ? JSON.parse(raw.toString('utf8')) : {}
 
       if (method === 'getMe') {
         res.end(JSON.stringify({ ok: true, result: { id: 1, is_bot: true, username: 'coo_test_bot' } }))
@@ -110,6 +118,14 @@ const server = await startFakeTelegram()
 const apiBase = `http://127.0.0.1:${server.address().port}`
 const host = fakeHost()
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tg-world-'))
+const GROUP_ID = '-100999'
+const shotsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tg-shots-'))
+const shotOld = path.join(shotsDir, 'old.jpg')
+const shotNew = path.join(shotsDir, 'new.png')
+fs.writeFileSync(shotOld, Buffer.from([1, 2, 3]))
+fs.writeFileSync(shotNew, Buffer.from([4, 5, 6, 7]))
+const oldTime = new Date(Date.now() - 60_000)
+fs.utimesSync(shotOld, oldTime, oldTime)
 
 const world = definition.create({
   cfg: {
@@ -117,8 +133,9 @@ const world = definition.create({
     token: TOKEN,
     owner: CHAT_ID,
     guestMode: '朋友可聊天',
-    allow: CHAT_ID,
+    allow: `${CHAT_ID} ${GROUP_ID}`,
     replyChat: '',
+    photoDirs: shotsDir,
     apiBase,
   },
   dataDir,
@@ -236,6 +253,43 @@ assert.equal(photoEvent.blobs.length, 1)
 assert.equal(photoEvent.blobs[0].mime, 'image/jpeg')
 assert.equal(photoEvent.blobs[0].bytes.length, 4)
 assert.equal(photoEvent.blobs[0].fallbackText, '[图片]')
+
+// a chat title learnt from a message can be used as the target
+server.pushUpdate({
+  message_id: 19,
+  from: { id: Number(CHAT_ID), is_bot: false, first_name: 'Jim' },
+  chat: { id: Number(GROUP_ID), type: 'supergroup', title: '小窝' },
+  date: 1700000008,
+  text: '群里冒个泡',
+})
+await waitFor(() => host.events.length === 4, 'group message')
+const sentBeforeChat = server.sent.length
+const chatReceipt = await sendTool.handler({ text: '来了', chat: '小窝' })
+assert.match(String(chatReceipt), /已发到 Telegram/)
+assert.equal(server.sent[sentBeforeChat].chat_id, GROUP_ID)
+
+// photo: send a file inside the allowed directory
+const photoReceipt = await sendTool.handler({ text: '截图', photo: shotNew, chat: '小窝' })
+assert.match(String(photoReceipt), /已发到 Telegram/)
+assert.match(String(photoReceipt), /new\.png/)
+const photoCall = server.sent.at(-1)
+assert.equal(photoCall.method, 'sendPhoto')
+const multipart = photoCall.raw.toString('latin1')
+const multipartText = photoCall.raw.toString('utf8')
+assert.match(multipart, /name="chat_id"/)
+assert.ok(multipart.includes(GROUP_ID), 'chat id goes in the multipart body')
+assert.ok(multipartText.includes('截图'), 'text becomes the caption')
+assert.ok(multipart.includes('filename="new.png"'))
+
+// a directory means "the newest image inside it"
+const dirReceipt = await sendTool.handler({ photo: shotsDir, chat: '小窝' })
+assert.match(String(dirReceipt), /new\.png/)
+
+// a path outside the allowed directories is refused
+const outside = path.join(dataDir, 'outside.jpg')
+fs.writeFileSync(outside, Buffer.from([9]))
+const refused = await sendTool.handler({ photo: outside, chat: '小窝' })
+assert.match(String(refused), /不在允许发图的目录里/)
 
 // default policy: a guest that is allowed may not command the pet at all
 await world.stop()
