@@ -442,10 +442,13 @@ export class TelegramWorld {
 
     this.received += 1
     this.lastChatId = chatId
+    const fromId = message.from?.id ?? null
     const who =
       [message.from?.first_name, message.from?.last_name].filter(Boolean).join(' ') ||
       message.from?.username ||
       chatId
+    // Names repeat and can be edited; the numeric id is the only stable identity in a group.
+    const sender = fromId === null ? who : `${who}(id:${fromId})`
     const kind =
       chat.type === 'private' ? '私聊' : chat.type === 'group' || chat.type === 'supergroup' ? '群聊' : chat.type
     const role = owner ? '主人' : '朋友，不是主人'
@@ -466,10 +469,12 @@ export class TelegramWorld {
     }
     const body = [label, text].filter(Boolean).join(' ')
     const quoted = this.quoteOf(message.reply_to_message)
-    const quote = quoted ? `「回复 ${quoted.name}：${quoted.text}」` : ''
+    const quote = quoted
+      ? `「回复 ${quoted.name}${quoted.fromId === null ? '' : `(id:${quoted.fromId})`}：${quoted.text}」`
+      : ''
 
     this.host?.log.info(
-      `telegram: 收到 ${kind} ${who}（${chatId}，${role}）${quoted ? ' [回复]' : ''}：${(text || label).slice(0, 40)}`,
+      `telegram: 收到 ${kind} ${sender}（${chatId}，${role}）${quoted ? ' [回复]' : ''}：${(text || label).slice(0, 40)}`,
     )
 
     await this.host?.pushEvent(
@@ -478,13 +483,14 @@ export class TelegramWorld {
         source: WORLD_ID,
         ts: new Date().toISOString(),
         origin: 'external',
-        text: `【Telegram ${kind} ${who}（${role}）】${quote}${body}`,
+        text: `【Telegram ${kind} ${sender}（${role}）】${quote}${body}`,
         senderKey: chatId,
         meta: {
           chatId,
           messageId: message.message_id,
-          fromId: message.from?.id ?? null,
+          fromId,
           fromName: who,
+          fromUsername: message.from?.username ?? null,
           role: owner ? 'owner' : 'guest',
           hasMedia: Boolean(media),
           replyTo: quoted ?? undefined,
@@ -495,7 +501,7 @@ export class TelegramWorld {
     )
   }
 
-  /** What a `reply_to_message` points at: who wrote it and the start of what it said. */
+  /** What a `reply_to_message` points at: who wrote it (name and id) and the start of what it said. */
   quoteOf(reply) {
     if (!reply) return null
     const name =
@@ -511,7 +517,7 @@ export class TelegramWorld {
       (reply.voice ? '[语音]' : '') ||
       (reply.animation ? '[动图]' : '')
     const text = raw.replace(/\s+/g, ' ').trim().slice(0, 120) || '[消息]'
-    return { messageId: reply.message_id ?? null, name, text }
+    return { messageId: reply.message_id ?? null, name, fromId: reply.from?.id ?? null, text }
   }
 
   /** The one image-like attachment a Telegram message carries, if any. */
