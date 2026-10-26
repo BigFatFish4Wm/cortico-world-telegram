@@ -266,6 +266,7 @@ await waitFor(() => host.events.length === 4, 'group message')
 const groupEvent = host.events[3]
 assert.match(groupEvent.text, /\(id:424242\)/, 'group messages carry the sender id, not just a name')
 assert.equal(groupEvent.meta.fromId, 424242)
+assert.match(groupEvent.text, /（主人）/m, 'the owner is the owner in a group too')
 assert.match(host.events[0].text, /\(id:424242\)/, 'private messages carry the id too')
 const sentBeforeChat = server.sent.length
 const chatReceipt = await sendTool.handler({ text: '来了', chat: '小窝' })
