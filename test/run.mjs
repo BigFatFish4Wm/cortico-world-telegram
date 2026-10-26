@@ -312,6 +312,21 @@ fs.writeFileSync(outside, Buffer.from([9]))
 const refused = await sendTool.handler({ photo: outside, chat: '小窝' })
 assert.match(String(refused), /不在允许发图的目录里/)
 
+// a burst of messages is drained in order, without losing any
+const beforeBurst = host.events.length
+for (let i = 0; i < 5; i += 1) {
+  server.pushUpdate({
+    message_id: 30 + i,
+    from: { id: Number(CHAT_ID), is_bot: false, first_name: 'Jim' },
+    chat: { id: Number(CHAT_ID), type: 'private' },
+    date: 1700000010 + i,
+    text: `连发 ${i}`,
+  })
+}
+await waitFor(() => host.events.length === beforeBurst + 5, 'burst drained')
+const burst = host.events.slice(beforeBurst).map((e) => e.text.match(/连发 (\d)/)?.[1])
+assert.deepEqual(burst, ['0', '1', '2', '3', '4'])
+
 // default policy: a guest that is allowed may not command the pet at all
 await world.stop()
 const server2 = await startFakeTelegram()
