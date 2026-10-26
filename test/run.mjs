@@ -268,6 +268,27 @@ const chatReceipt = await sendTool.handler({ text: '来了', chat: '小窝' })
 assert.match(String(chatReceipt), /已发到 Telegram/)
 assert.equal(server.sent[sentBeforeChat].chat_id, GROUP_ID)
 
+// a reply carries what it answers: who wrote it and the start of that line
+assert.ok(!host.events[0].text.includes('「回复'), 'a plain message carries no quote')
+server.pushUpdate({
+  message_id: 20,
+  from: { id: Number(CHAT_ID), is_bot: false, first_name: 'Jim' },
+  chat: { id: Number(CHAT_ID), type: 'private' },
+  date: 1700000009,
+  text: '这条是回复',
+  reply_to_message: {
+    message_id: 11,
+    from: { id: 1, is_bot: true, first_name: 'BigFatFish' },
+    text: '买到了',
+  },
+})
+await waitFor(() => host.events.length === 5, 'reply event')
+const replyEvent = host.events[4]
+assert.match(replyEvent.text, /「回复 BigFatFish：买到了」/)
+assert.match(replyEvent.text, /这条是回复/)
+assert.equal(replyEvent.meta.replyTo.name, 'BigFatFish')
+assert.equal(replyEvent.meta.replyTo.messageId, 11)
+
 // photo: send a file inside the allowed directory
 const photoReceipt = await sendTool.handler({ text: '截图', photo: shotNew, chat: '小窝' })
 assert.match(String(photoReceipt), /已发到 Telegram/)
