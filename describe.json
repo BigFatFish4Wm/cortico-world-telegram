@@ -136,8 +136,8 @@
     {
       "type": "telegram.message",
       "description": {
-        "zh": "人在 Telegram 上发来的一条消息（只来自 allow 名单里的会话）；群聊和频道会带上名字与 id。",
-        "en": "One message the person sent on Telegram, from an allow-listed chat only; a group or channel carries its title and id."
+        "zh": "人在 Telegram 上发来的一条消息（只来自 allow 名单里的会话）；群聊和频道会带上名字与 id。同一会话连着发的几条会合并成一条事件，正文带「连发 N 条」，每行有自己的时间和发送者。",
+        "en": "One message the person sent on Telegram, from an allow-listed chat only; a group or channel carries its title and id. Consecutive messages of one chat arrive as one merged event marked with its count, each line carrying its own time and sender."
       },
       "trigger": "flush"
     },

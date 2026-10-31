@@ -16,6 +16,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
+import { MessageBatcher } from './batcher.js'
+
 const WORLD_ID = 'telegram'
 const DEFAULT_API_BASE = 'https://api.telegram.org'
 const MAX_TEXT = 4000
@@ -71,6 +73,12 @@ const DEFAULT_CONTINUITY = 3
 const DEFAULT_WINDOW_SEC = 120
 /** One reminder per chat per window when the owner writes somewhere not on the allow list. */
 const NOT_ALLOWED_NOTICE_MS = 10 * 60_000
+const DEFAULT_MERGE_WINDOW_MS = 1000
+const DEFAULT_MERGE_MAX_WAIT_MS = 3000
+const DEFAULT_MERGE_MAX_MESSAGES = 8
+const DEFAULT_MERGE_MAX_CHARS = 2400
+/** A batch never holds more attachment bytes than this; a photo burst flushes early instead. */
+const MAX_BATCH_BYTES = 20 * 1024 * 1024
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -85,6 +93,13 @@ function formatSize(bytes) {
   const size = Number(bytes) || 0
   if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`
   return `${Math.max(1, Math.round(size / 1024))} KB`
+}
+
+/** A stored number clamped into its knob's range, or the default when it is not a number. */
+function boundedInt(value, min, max, fallback) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return fallback
+  return Math.max(min, Math.min(max, Math.round(number)))
 }
 
 /** The saved asset's extension: `.webp` static, `.tgs` animated, `.webm` video. */
@@ -256,6 +271,8 @@ export class TelegramWorld {
     this.unreadPushedAt = 0
     this.unreadSeq = 0
     this.unreadDropped = 0
+    /** Coalesces a chat's consecutive messages into one event; built in `start`. */
+    this.batcher = null
     this.stickerDir = typeof options.ctx?.dataDir === 'string' && options.ctx.dataDir
       ? path.join(options.ctx.dataDir, 'telegram-stickers')
       : null
@@ -366,6 +383,30 @@ export class TelegramWorld {
   get continuityCount() {
     const value = Number(this.setting('continuityCount', this.cfg.continuityCount) || DEFAULT_CONTINUITY)
     return Math.max(1, Math.min(20, Math.round(value)))
+  }
+
+  /** Merge consecutive messages of one chat into one event; off restores one event per message. */
+  get mergeEnabled() {
+    return this.setting('mergeEnabled', this.cfg.mergeEnabled) !== false
+  }
+
+  /** Idle gap that closes a batch. */
+  get mergeWindowMs() {
+    return boundedInt(this.setting('mergeWindowMs', this.cfg.mergeWindowMs), 50, 10000, DEFAULT_MERGE_WINDOW_MS)
+  }
+
+  /** Hard deadline from a batch's first message, so a chat that never goes quiet still flushes. */
+  get mergeMaxWaitMs() {
+    const value = boundedInt(this.setting('mergeMaxWaitMs', this.cfg.mergeMaxWaitMs), 100, 60000, DEFAULT_MERGE_MAX_WAIT_MS)
+    return Math.max(value, this.mergeWindowMs)
+  }
+
+  get mergeMaxMessages() {
+    return boundedInt(this.setting('mergeMaxMessages', this.cfg.mergeMaxMessages), 2, 50, DEFAULT_MERGE_MAX_MESSAGES)
+  }
+
+  get mergeMaxChars() {
+    return boundedInt(this.setting('mergeMaxChars', this.cfg.mergeMaxChars), 200, 40000, DEFAULT_MERGE_MAX_CHARS)
   }
 
   get continuityWindowMs() {
@@ -628,6 +669,20 @@ export class TelegramWorld {
     }
 
     this.abort = new AbortController()
+    this.batcher = new MessageBatcher({
+      windowMs: this.mergeWindowMs,
+      maxWaitMs: this.mergeMaxWaitMs,
+      maxMessages: this.mergeMaxMessages,
+      maxChars: this.mergeMaxChars,
+      maxBytes: MAX_BATCH_BYTES,
+      log: { warn: (line) => host.log.warn(`telegram: ${line}`) },
+      onFlush: (chatId, items) => this.emitBatch(chatId, items),
+    })
+    host.log.info(
+      this.mergeEnabled
+        ? `telegram: 连发合并开：静默 ${this.mergeWindowMs}ms / 最长 ${this.mergeMaxWaitMs}ms / 每批 ≤${this.mergeMaxMessages} 条、≤${this.mergeMaxChars} 字`
+        : 'telegram: 连发合并关：每条消息各自唤醒一次',
+    )
     this.loopPromise = this.loop(this.abort.signal)
   }
 
@@ -641,6 +696,13 @@ export class TelegramWorld {
       // the abort is the normal way out of a long poll
     }
     this.loopPromise = null
+    // Messages still inside the merge window are delivered now, while the host is still attached.
+    try {
+      await this.batcher?.stop()
+    } catch (error) {
+      this.host?.log.warn(`telegram: 收尾合并失败：${error.message}`)
+    }
+    this.batcher = null
     this.host = null
     this.state = 'offline'
     this.hint = ''
@@ -733,6 +795,10 @@ export class TelegramWorld {
     const isChannel = chat.type === 'channel'
     const words = text.split(/\s+/)
     const command = (words[0] ?? '').toLowerCase().replace(/@[\w_]+$/, '')
+
+    // A command is a barrier: whatever this chat already typed is delivered first, so the command
+    // is never folded into the small talk before it.
+    if (command.startsWith('/')) await this.flushChat(chatId)
 
     if (command === '/id' || command === '/chatid' || command === '/start') {
       await this.say(chatId, `chat id：${chatId}${asText(chat.title) ? `（${chat.title}）` : ''}`)
@@ -865,17 +931,80 @@ export class TelegramWorld {
     // is the chat, and a channel post has no person besides the chat itself.
     const where = isGroup || isChannel ? `「${title}」(${chatId})` : ''
     const speaker = isChannel ? '' : `${sender}（${role}）`
-    const head = [kind, where, speaker].filter(Boolean).join(' ')
 
     this.host?.log.info(
       `telegram: 收到 ${kind}${where ? ` ${title}(${chatId})` : ''} ${sender}（${role}）${quoted ? ' [回复]' : ''}：${(text || label).slice(0, 40)}`,
     )
 
+    await this.enqueueMessage(
+      chatId,
+      {
+        ts: new Date().toISOString(),
+        messageId: message.message_id ?? null,
+        kind,
+        where,
+        speaker,
+        body,
+        quote,
+        quoted,
+        blobs,
+        chatTitle: isGroup || isChannel ? title : null,
+        fromId,
+        fromName: who,
+        fromUsername: message.from?.username ?? null,
+        role: owner ? 'owner' : 'guest',
+        hasMedia: Boolean(media),
+        sticker: sticker ? `#${sticker.seq}` : undefined,
+      },
+      {
+        // A mention or an owner command is answered on its own, right after what came before it.
+        urgent: mention || ownerCommand,
+        weight: (blobs ?? []).reduce((sum, blob) => sum + blob.bytes.length, 0),
+      },
+    )
+  }
+
+  /** Hands one message to its chat's batcher; with merging off it goes straight out as an event. */
+  async enqueueMessage(chatId, item, { urgent = false, weight = 0 } = {}) {
+    if (!this.mergeEnabled || !this.batcher) {
+      await this.emitBatch(chatId, [item])
+      return
+    }
+    await this.batcher.enqueue(chatId, item, { urgent, weight })
+  }
+
+  /** Delivers what a chat already has pending, e.g. before a command is handled. */
+  async flushChat(chatId) {
+    if (!this.mergeEnabled || !this.batcher) return
+    await this.batcher.flush(chatId)
+  }
+
+  /**
+   * One event for one chat. A single message keeps the shape it always had; a batch puts the chat
+   * in the head and gives every line its own time and speaker, so several people in a group stay
+   * distinguishable.
+   */
+  async emitBatch(chatId, items) {
+    if (!items.length) return
+    const first = items[0]
+    const last = items[items.length - 1]
+    const count = items.length
+    const headParts = [first.kind, first.where]
+    if (count === 1) headParts.push(first.speaker)
+    else headParts.push(`（连发 ${count} 条）`)
+    const head = headParts.filter(Boolean).join(' ')
+    const lines = items
+      .map((item) => `[${item.ts.slice(11, 16)}] ${item.speaker || item.fromName}：${item.quote ?? ''}${item.body}`)
+      .join('\n')
+    const blobs = items.flatMap((item) => item.blobs ?? [])
+
+    // The chat now waits for an answer as a whole, not once per merged message.
     this.awaiting.set(chatId, {
       at: Date.now(),
-      name: isGroup || isChannel ? title : who,
-      messageId: message.message_id ?? null,
+      name: first.chatTitle || first.fromName || chatId,
+      messageId: last.messageId ?? null,
     })
+    if (count > 1) this.host?.log.info(`telegram: ${count} 条连发合并成一次事件（${chatId}）`)
 
     await this.host?.pushEvent(
       {
@@ -883,21 +1012,36 @@ export class TelegramWorld {
         source: WORLD_ID,
         ts: new Date().toISOString(),
         origin: 'external',
-        text: `【Telegram ${head}】${quote}${body}`,
+        text: count === 1 ? `【Telegram ${head}】${first.quote}${first.body}` : `【Telegram ${head}】\n${lines}`,
         senderKey: chatId,
         meta: {
           chatId,
-          chatTitle: isGroup || isChannel ? title : null,
-          messageId: message.message_id,
-          fromId,
-          fromName: who,
-          fromUsername: message.from?.username ?? null,
-          role: owner ? 'owner' : 'guest',
-          hasMedia: Boolean(media),
-          sticker: sticker ? `#${sticker.seq}` : undefined,
-          replyTo: quoted ?? undefined,
+          chatTitle: first.chatTitle ?? null,
+          messageId: last.messageId,
+          fromId: first.fromId,
+          fromName: first.fromName,
+          fromUsername: first.fromUsername,
+          // A batch that mixes the owner and a guest is reported as the guest: never claim more.
+          role: items.some((item) => item.role === 'guest') ? 'guest' : first.role,
+          hasMedia: items.some((item) => item.hasMedia),
+          sticker: count === 1 ? first.sticker : undefined,
+          replyTo: last.quoted ?? undefined,
+          count,
+          messages:
+            count === 1
+              ? undefined
+              : items.map((item) => ({
+                  messageId: item.messageId,
+                  fromId: item.fromId,
+                  fromName: item.fromName,
+                  role: item.role,
+                  kind: item.kind,
+                  ts: item.ts,
+                  hasMedia: item.hasMedia,
+                  sticker: item.sticker,
+                })),
         },
-        blobs,
+        blobs: blobs.length ? blobs : undefined,
       },
       { trigger: 'flush' },
     )
@@ -1754,6 +1898,7 @@ export class TelegramWorld {
         { label: '发出', value: this.sent, tone: 'plain' },
         { label: '未读', value: this.unread.length, tone: 'plain' },
         { label: '贴纸', value: this.stickers.size, tone: 'plain' },
+        { label: '待合并', value: this.batcher?.pending ?? 0, tone: 'plain' },
       ],
       config: [
         {
@@ -1834,6 +1979,45 @@ export class TelegramWorld {
                 'x-hot': true,
                 description: '默认 300，超出丢最久没出现的。',
               },
+              [at('mergeEnabled')]: {
+                type: 'boolean',
+                title: '连发合并成一次唤醒',
+                description:
+                  '开着时，同一个人（同一个群）连着发的几条先攒一下，攒完合成一条事件唤醒一次模型；命令和 @ 到这个 bot 的消息不参与合并，会先把它前面攒的发出去、自己单独发。关掉就回到每条消息各唤醒一次。',
+                'x-hot': true,
+              },
+              [at('mergeWindowMs')]: {
+                type: 'integer',
+                title: '合并静默窗（毫秒）',
+                minimum: 50,
+                maximum: 10000,
+                'x-hot': false,
+                description: '最后一条消息之后等这么久没新消息就发；默认 1000。改完要重启 World。',
+              },
+              [at('mergeMaxWaitMs')]: {
+                type: 'integer',
+                title: '合并最长等待（毫秒）',
+                minimum: 100,
+                maximum: 60000,
+                'x-hot': false,
+                description: '一直有人在发也不能无限等：从这批第一条开始算，到点就发；默认 3000，不会小于静默窗。',
+              },
+              [at('mergeMaxMessages')]: {
+                type: 'integer',
+                title: '一批最多几条',
+                minimum: 2,
+                maximum: 50,
+                'x-hot': false,
+                description: '默认 8；攒到这么多立刻发，不再等静默窗。',
+              },
+              [at('mergeMaxChars')]: {
+                type: 'integer',
+                title: '一批正文最多多少字',
+                minimum: 200,
+                maximum: 40000,
+                'x-hot': false,
+                description: '默认 2400；到量立刻发，免得一条事件把上下文撑爆。',
+              },
               [at('unreadMode')]: {
                 type: 'string',
                 title: '群消息未读模式',
@@ -1905,8 +2089,8 @@ const DESCRIBE = {
     {
       type: 'telegram.message',
       description: {
-        zh: '人在 Telegram 上发来的一条消息（只来自 allow 名单里的会话）；群聊和频道会带上名字与 id。',
-        en: 'One message the person sent on Telegram, from an allow-listed chat only; a group or channel carries its title and id.',
+        zh: '人在 Telegram 上发来的一条消息（只来自 allow 名单里的会话）；群聊和频道会带上名字与 id。同一会话连着发的几条会合并成一条事件，正文带「连发 N 条」，每行有自己的时间和发送者。',
+        en: 'One message the person sent on Telegram, from an allow-listed chat only; a group or channel carries its title and id. Consecutive messages of one chat arrive as one merged event marked with its count, each line carrying its own time and sender.',
       },
       trigger: 'flush',
     },
@@ -1943,6 +2127,11 @@ export const definition = {
     fileDirs: '',
     stickerEnabled: true,
     stickerMax: DEFAULT_STICKER_MAX,
+    mergeEnabled: true,
+    mergeWindowMs: DEFAULT_MERGE_WINDOW_MS,
+    mergeMaxWaitMs: DEFAULT_MERGE_MAX_WAIT_MS,
+    mergeMaxMessages: DEFAULT_MERGE_MAX_MESSAGES,
+    mergeMaxChars: DEFAULT_MERGE_MAX_CHARS,
     groupMentionOnly: false,
     mentionKeywords: '',
     continuityCount: DEFAULT_CONTINUITY,

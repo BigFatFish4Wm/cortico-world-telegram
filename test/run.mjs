@@ -159,6 +159,7 @@ fs.utimesSync(shotOld, oldTime, oldTime)
 
 const world = definition.create({
   cfg: {
+    mergeEnabled: false,
     enabled: true,
     token: TOKEN,
     owner: CHAT_ID,
@@ -369,6 +370,7 @@ const server2 = await startFakeTelegram()
 const apiBase2 = `http://127.0.0.1:${server2.address().port}`
 const world2 = new TelegramWorld({
   cfg: {
+    mergeEnabled: false,
     enabled: true,
     token: TOKEN,
     owner: CHAT_ID,
@@ -399,6 +401,7 @@ const server3 = await startFakeTelegram()
 const apiBase3 = `http://127.0.0.1:${server3.address().port}`
 const world3 = new TelegramWorld({
   cfg: {
+    mergeEnabled: false,
     enabled: true,
     token: TOKEN,
     owner: CHAT_ID,
@@ -487,6 +490,7 @@ const apiBase4 = `http://127.0.0.1:${server4.address().port}`
 const dataDir4 = fs.mkdtempSync(path.join(os.tmpdir(), 'tg-world4-'))
 const world4 = new TelegramWorld({
   cfg: {
+    mergeEnabled: false,
     enabled: true,
     token: TOKEN,
     owner: CHAT_ID,
@@ -562,7 +566,7 @@ const server5 = await startFakeTelegram()
 const apiBase5 = `http://127.0.0.1:${server5.address().port}`
 const dataDir5 = fs.mkdtempSync(path.join(os.tmpdir(), 'tg-world5-'))
 const world5 = new TelegramWorld({
-  cfg: { enabled: true, token: TOKEN, owner: CHAT_ID, guestMode: '朋友可聊天', allow: `${CHAT_ID} ${GROUP_ID}`, replyChat: '', apiBase: apiBase5 },
+  cfg: { mergeEnabled: false, enabled: true, token: TOKEN, owner: CHAT_ID, guestMode: '朋友可聊天', allow: `${CHAT_ID} ${GROUP_ID}`, replyChat: '', apiBase: apiBase5 },
   ctx: { dataDir: dataDir5 },
 })
 const host5 = fakeHost()
@@ -597,6 +601,7 @@ const GROUP_A = '-100777'
 const GROUP_B = '-100888'
 const world6 = new TelegramWorld({
   cfg: {
+    mergeEnabled: false,
     enabled: true,
     token: TOKEN,
     owner: CHAT_ID,
@@ -657,7 +662,7 @@ const server6b = await startFakeTelegram()
 const apiBase6b = `http://127.0.0.1:${server6b.address().port}`
 const CHANNEL_ID = '-100555'
 const world6b = new TelegramWorld({
-  cfg: { enabled: true, token: TOKEN, owner: CHAT_ID, guestMode: '朋友可聊天', allow: `${CHAT_ID} ${CHANNEL_ID}`, replyChat: '', apiBase: apiBase6b },
+  cfg: { mergeEnabled: false, enabled: true, token: TOKEN, owner: CHAT_ID, guestMode: '朋友可聊天', allow: `${CHAT_ID} ${CHANNEL_ID}`, replyChat: '', apiBase: apiBase6b },
   ctx: { dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'tg-world6b-')) },
 })
 const host6b = fakeHost()
@@ -684,7 +689,7 @@ const apiBase7 = `http://127.0.0.1:${server7.address().port}`
 const dataDir7 = fs.mkdtempSync(path.join(os.tmpdir(), 'tg-world7-'))
 const GROUP_C = '-100999888'
 const world7 = new TelegramWorld({
-  cfg: { enabled: true, token: TOKEN, owner: CHAT_ID, guestMode: '朋友可聊天', allow: CHAT_ID, replyChat: '', apiBase: apiBase7 },
+  cfg: { mergeEnabled: false, enabled: true, token: TOKEN, owner: CHAT_ID, guestMode: '朋友可聊天', allow: CHAT_ID, replyChat: '', apiBase: apiBase7 },
   ctx: { dataDir: dataDir7 },
 })
 const host7 = fakeHost()
@@ -747,7 +752,7 @@ const server8 = await startFakeTelegram()
 const apiBase8 = `http://127.0.0.1:${server8.address().port}`
 const dataDir8 = fs.mkdtempSync(path.join(os.tmpdir(), 'tg-world8-'))
 const world8 = new TelegramWorld({
-  cfg: { enabled: true, token: TOKEN, owner: CHAT_ID, guestMode: '朋友可聊天', allow: `${CHAT_ID} ${GROUP_ID}`, replyChat: '', apiBase: apiBase8 },
+  cfg: { mergeEnabled: false, enabled: true, token: TOKEN, owner: CHAT_ID, guestMode: '朋友可聊天', allow: `${CHAT_ID} ${GROUP_ID}`, replyChat: '', apiBase: apiBase8 },
   ctx: { dataDir: dataDir8 },
 })
 const host8 = fakeHost()
@@ -826,7 +831,7 @@ assert.match(String(await sendStickerTool.handler({ sticker: '#99', chatId: CHAT
 const server8b = await startFakeTelegram()
 const apiBase8b = `http://127.0.0.1:${server8b.address().port}`
 const world8b = new TelegramWorld({
-  cfg: { enabled: true, token: TOKEN, owner: CHAT_ID, guestMode: '朋友可聊天', allow: CHAT_ID, replyChat: '', stickerEnabled: false, apiBase: apiBase8b },
+  cfg: { mergeEnabled: false, enabled: true, token: TOKEN, owner: CHAT_ID, guestMode: '朋友可聊天', allow: CHAT_ID, replyChat: '', stickerEnabled: false, apiBase: apiBase8b },
   ctx: { dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'tg-world8b-')) },
 })
 const host8b = fakeHost()
@@ -864,6 +869,7 @@ fs.utimesSync(pdfPath, oldDocTime, oldDocTime)
 
 const world9 = new TelegramWorld({
   cfg: {
+    mergeEnabled: false,
     enabled: true,
     token: TOKEN,
     owner: CHAT_ID,
@@ -922,7 +928,7 @@ assert.match(refused9, /当前允许/)
 
 // fileDirs 留空时沿用发图目录
 const world9b = new TelegramWorld({
-  cfg: { enabled: true, token: TOKEN, owner: CHAT_ID, guestMode: '朋友可聊天', allow: CHAT_ID, replyChat: '', photoDirs: docsDir, apiBase: apiBase9 },
+  cfg: { mergeEnabled: false, enabled: true, token: TOKEN, owner: CHAT_ID, guestMode: '朋友可聊天', allow: CHAT_ID, replyChat: '', photoDirs: docsDir, apiBase: apiBase9 },
   ctx: { dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'tg-world9b-')) },
 })
 const host9b = fakeHost()
@@ -933,7 +939,7 @@ await world9b.stop()
 
 // 没配任何目录时给出可操作的错误
 const world9c = new TelegramWorld({
-  cfg: { enabled: true, token: TOKEN, owner: CHAT_ID, allow: CHAT_ID, replyChat: '', apiBase: apiBase9 },
+  cfg: { mergeEnabled: false, enabled: true, token: TOKEN, owner: CHAT_ID, allow: CHAT_ID, replyChat: '', apiBase: apiBase9 },
   ctx: { dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'tg-world9c-')) },
 })
 const host9c = fakeHost()
@@ -945,4 +951,233 @@ await world9c.stop()
 await world9.stop()
 server9.close()
 
-console.log('ok: 收消息→事件、tg_send→sendMessage、/id、/allow 白名单、未读缓存模式、多群回复分流、新群放行、频道、贴纸收藏与重发、发文件')
+// ---- 连发合并：同一会话连着发的几条合成一条事件、一次唤醒 ----
+const server10 = await startFakeTelegram()
+const apiBase10 = `http://127.0.0.1:${server10.address().port}`
+const world10 = new TelegramWorld({
+  cfg: {
+    enabled: true,
+    token: TOKEN,
+    owner: CHAT_ID,
+    guestMode: '朋友可聊天',
+    allow: `${CHAT_ID} ${GROUP_A}`,
+    replyChat: '',
+    mergeWindowMs: 80,
+    mergeMaxWaitMs: 240,
+    mergeMaxMessages: 3,
+    mergeMaxChars: 400,
+    apiBase: apiBase10,
+  },
+  ctx: { dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'tg-world10-')) },
+})
+const host10 = fakeHost()
+await world10.start(host10)
+
+let seq10 = 700
+const push10 = (chatId, text, extra = {}, chatType = 'private') => server10.pushUpdate({
+  message_id: seq10++,
+  from: { id: Number(CHAT_ID), is_bot: false, first_name: '阿梦' },
+  chat: chatType === 'private'
+    ? { id: Number(chatId), type: 'private' }
+    : { id: Number(chatId), type: 'supergroup', title: '小窝' },
+  date: 1700004000 + seq10,
+  text,
+  ...extra,
+})
+const events10 = () => host10.events.length
+const settle = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+// 单条：形状与不合并时一致，只多一个 count
+push10(CHAT_ID, '一个人说一句')
+await waitFor(() => events10() === 1, '单条消息的事件')
+assert.match(host10.events[0].text, /^【Telegram 私聊 阿梦\(id:424242\)（主人）】一个人说一句$/)
+assert.equal(host10.events[0].meta.count, 1)
+assert.equal(host10.events[0].meta.fromName, '阿梦')
+
+// 三条连发：一条事件、三行、各自带时间和发送者
+push10(CHAT_ID, '在吗')
+push10(CHAT_ID, '问你个事')
+push10(CHAT_ID, '急')
+await waitFor(() => events10() === 2, '三条连发合成一条')
+const merged = host10.events[1]
+assert.equal(merged.meta.count, 3)
+assert.match(merged.text, /【Telegram 私聊 （连发 3 条）】/)
+assert.match(merged.text, /\[\d{2}:\d{2}\] 阿梦\(id:424242\)（主人）：在吗/)
+assert.match(merged.text, /问你个事/)
+assert.match(merged.text, /急/)
+assert.deepEqual(
+  merged.text.split('\n').slice(1).map((line) => line.split('：').at(-1)),
+  ['在吗', '问你个事', '急'],
+  '顺序按到达',
+)
+assert.equal(merged.meta.messages.length, 3)
+assert.equal(host10.events[0].meta.count, 1, '先前的事件没被改写')
+
+// 合并后只算一个在等回复的会话，回一次就出队
+assert.equal(world10.awaiting.size, 1)
+await world10.tools().find((tool) => tool.name === 'tg_send').handler({ text: '在' })
+assert.equal(world10.awaiting.size, 0)
+
+// 两个会话各攒各的：互不污染
+push10(CHAT_ID, '私聊第一句')
+push10(GROUP_A, '群里第一句', {}, 'group')
+await waitFor(() => events10() === 4, '两个会话各一条')
+const byChat = new Map(host10.events.slice(2).map((event) => [event.meta.chatId, event.meta.count]))
+assert.equal(byChat.get(CHAT_ID), 1)
+assert.equal(byChat.get(GROUP_A), 1)
+
+// @ 是屏障：先把它前面攒的发出去，再单独发它自己
+push10(GROUP_A, '前面一句普通话', {}, 'group')
+await settle(20)
+push10(GROUP_A, '@coo_test_bot 看我', {}, 'group')
+await waitFor(() => events10() === 6, '普通话与 @ 各自一条')
+assert.equal(host10.events[4].meta.count, 1)
+assert.match(host10.events[4].text, /前面一句普通话/)
+assert.equal(host10.events[5].meta.count, 1)
+assert.match(host10.events[5].text, /看我/)
+assert.ok(!host10.events[5].text.includes('前面一句普通话'), '@ 没把前一句吞掉')
+
+// 命令也是屏障：/id 先回，前面攒的那条单独发
+push10(CHAT_ID, '问个 id')
+await settle(20)
+const sentBefore10 = server10.sent.length
+push10(CHAT_ID, '/id')
+await waitFor(() => server10.sent.length > sentBefore10, '/id 的回复')
+assert.match(server10.sent.at(-1).text, /chat id/)
+await waitFor(() => events10() === 7, '命令前的消息已单独发出')
+assert.match(host10.events[6].text, /问个 id/)
+assert.ok(!host10.events.some((event) => /\/id/.test(event.text)), '命令不进对话事件')
+
+// 条数上限：3 条到顶立刻发，不等静默窗
+const before11 = events10()
+push10(CHAT_ID, 'a1')
+push10(CHAT_ID, 'a2')
+push10(CHAT_ID, 'a3')
+push10(CHAT_ID, 'a4')
+await waitFor(() => events10() === before11 + 2, '到 3 条立刻发 + 剩 1 条按静默窗发')
+assert.equal(host10.events[before11].meta.count, 3, '到上限的那批立刻发')
+assert.equal(host10.events[before11 + 1].meta.count, 1, '第 4 条另起一批')
+assert.match(host10.events[before11 + 1].text, /a4/)
+
+// 最长等待：一直有消息也不能无限等（这个 world 把条数上限放宽，才测得到 deadline）
+const server10b = await startFakeTelegram()
+const apiBase10b = `http://127.0.0.1:${server10b.address().port}`
+const world10b = new TelegramWorld({
+  cfg: {
+    enabled: true,
+    token: TOKEN,
+    owner: CHAT_ID,
+    guestMode: '朋友可聊天',
+    allow: CHAT_ID,
+    replyChat: '',
+    mergeWindowMs: 80,
+    mergeMaxWaitMs: 240,
+    mergeMaxMessages: 20,
+    mergeMaxChars: 100000,
+    apiBase: apiBase10b,
+  },
+  ctx: { dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'tg-world10b-')) },
+})
+const host10b = fakeHost()
+await world10b.start(host10b)
+let seq10b = 800
+const push10b = (text) => server10b.pushUpdate({
+  message_id: seq10b++,
+  from: { id: Number(CHAT_ID), is_bot: false, first_name: '阿梦' },
+  chat: { id: Number(CHAT_ID), type: 'private' },
+  date: 1700005000 + seq10b,
+  text,
+})
+const startedAt = Date.now()
+for (let i = 0; i < 8; i += 1) {
+  push10b(`连发${i}`)
+  await settle(40)
+}
+await waitFor(() => host10b.events.length > 0, '最长等待到了就发')
+assert.ok(Date.now() - startedAt < 1500, '没有一直等到安静')
+assert.ok(host10b.events[0].meta.count >= 2, '连续流量里攒到了多条')
+assert.ok(host10b.events[0].meta.count < 8, '不是等到全部发完才发')
+await world10b.stop()
+server10b.close()
+
+// 图片进批：一条事件里既有字也有字节
+await settle(300)
+const before13 = events10()
+push10(CHAT_ID, '看这个')
+push10(CHAT_ID, '', {
+  caption: '配一句',
+  photo: [{ file_id: 'p10', file_unique_id: 'pu10', width: 800, height: 800, file_size: 4 }],
+})
+await waitFor(() => events10() === before13 + 1, '文字和图片合成一条')
+const withMedia = host10.events[before13]
+assert.equal(withMedia.meta.count, 2)
+assert.equal(withMedia.meta.hasMedia, true)
+assert.equal(withMedia.blobs.length, 1)
+assert.equal(withMedia.blobs[0].bytes.length, 4)
+assert.match(withMedia.text, /\[图片\]/)
+
+// 关掉合并：同一个 world 里立刻回到每条一次
+world10.cfg.mergeEnabled = false
+await settle(300)
+const before14 = events10()
+push10(CHAT_ID, '关掉后第一条')
+push10(CHAT_ID, '关掉后第二条')
+await waitFor(() => events10() === before14 + 2, '关掉合并后每条各一个事件')
+assert.equal(host10.events[before14].meta.count, 1)
+assert.equal(host10.events[before14 + 1].meta.count, 1)
+world10.cfg.mergeEnabled = true
+
+// stop 时把窗口里还没发的发出去
+await settle(300)
+const before15 = events10()
+push10(CHAT_ID, '最后一句')
+push10(CHAT_ID, '还没到点')
+await waitFor(() => world10.batcher?.pendingCount(CHAT_ID) === 2, '两条都在窗口里等着')
+assert.equal(events10(), before15, '还没到静默窗，先没有事件')
+await world10.stop()
+assert.equal(events10(), before15 + 1, 'stop 时把攒的合并发出去')
+assert.equal(host10.events[before15].meta.count, 2)
+
+server10.close()
+
+// ---- 合并器本身：失败不丢、顺序不乱 ----
+const { MessageBatcher } = await import('../batcher.js')
+{
+  const flushed = []
+  const batcher = new MessageBatcher({
+    windowMs: 20,
+    maxWaitMs: 60,
+    maxMessages: 10,
+    maxChars: 1000,
+    onFlush: async (key, items) => { flushed.push({ key, items }) },
+  })
+  await batcher.enqueue('c1', { body: '1' })
+  await batcher.enqueue('c1', { body: '2' })
+  await batcher.flush('c1')
+  assert.deepEqual(flushed.map((batch) => batch.items.map((item) => item.body)), [['1', '2']])
+  assert.equal(batcher.pending, 0)
+
+  let failures = 0
+  const retried = new MessageBatcher({
+    windowMs: 20,
+    maxWaitMs: 60,
+    maxMessages: 10,
+    onFlush: async (key, items) => {
+      if (failures === 0) {
+        failures += 1
+        throw new Error('host gone')
+      }
+      flushed.push({ key, items })
+    },
+    log: { warn() {} },
+  })
+  await retried.enqueue('c2', { body: 'x' })
+  await retried.flush('c2')
+  assert.equal(retried.pendingCount('c2'), 1, '投递失败后消息留在队列里')
+  await retried.flush('c2')
+  assert.equal(retried.pending, 0, '重试成功后出队')
+  assert.deepEqual(flushed.at(-1).items.map((item) => item.body), ['x'])
+  await retried.stop()
+}
+
+console.log('ok: 收消息→事件、tg_send→sendMessage、/id、/allow 白名单、未读缓存模式、多群回复分流、新群放行、频道、贴纸收藏与重发、发文件、连发合并')
