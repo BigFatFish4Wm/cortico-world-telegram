@@ -1,21 +1,134 @@
 {
   "tools": [
     {
-      "name": "tg_send",
-      "description": "Send a line, or one local image, to a Telegram chat through this bot. photo must be inside an allowed directory; a directory means the newest image inside it. chatId/chat picks the target, blank means the chat that last wrote.",
-      "tags": ["speak"],
+      "name": "tg_unread",
+      "tags": [
+        "memory"
+      ],
+      "description": "Take buffered Telegram group messages in batches. Only the entries actually returned are marked read; anything past `limit` stays buffered for the next call. Pass the returned `nextCursor` as `cursor` to resume pagination, or omit it to read the earliest remaining. conv filters one chat id, limit defaults to 20. The receipt says how many oldest messages were dropped if the buffer overflowed.",
       "parameters": {
         "type": "object",
         "properties": {
-          "text": { "type": "string", "maxLength": 4000, "description": "Text to send, or the caption when photo is set." },
-          "photo": { "type": "string", "maxLength": 512, "description": "Absolute path of an image file or a directory (the newest image inside is used)." },
-          "chatId": { "type": "string", "maxLength": 64, "description": "Optional chat id, \"last\", or part of a chat title." },
-          "chat": { "type": "string", "maxLength": 64, "description": "Optional chat title such as 小窝." }
+          "conv": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Optional chat id to read only that conversation."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "How many to take, default 20."
+          },
+          "cursor": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Resume after this cursor (from the previous result's nextCursor)."
+          }
         }
       },
       "summary": {
-        "zh": "通过 Telegram bot 发一句话，或一张本机图片（限允许的目录）。",
-        "en": "Send a line, or one local image from an allowed directory, on Telegram."
+        "zh": "取走 Telegram 群里攒下的未读消息(只在群消息未读模式开启时有用),分批取、用 nextCursor 翻页。",
+        "en": "Take buffered Telegram group messages (only when group-unread mode is on), in batches with nextCursor paging."
+      }
+    },
+    {
+      "name": "tg_send",
+      "tags": [
+        "speak"
+      ],
+      "description": "Send text, one local image, or local documents to a Telegram chat through this bot. text alone goes as a message; with photo or file it becomes the caption. photo is an absolute path to an image file, or a directory — then the newest image inside it is sent. file is any local document (pdf, md, docx, pptx, xlsx, zip, …): one path, a directory (the newest file inside is sent), or several paths separated by newlines, up to 10. Both must live under the directories allowed in this World settings; anything else is refused. chatId or chat picks the target: a numeric chat id, \"last\", or part of a chat title such as 小窝. With neither, it answers the chat that has been waiting longest, so several groups are answered in turn.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 4000,
+            "description": "Text to send, or the caption when photo or file is set."
+          },
+          "photo": {
+            "type": "string",
+            "maxLength": 512,
+            "description": "Absolute path of an image file or a directory (the newest image inside is used)."
+          },
+          "file": {
+            "type": "string",
+            "maxLength": 2000,
+            "description": "Absolute path of a document, a directory (the newest file inside is used), or several paths separated by newlines."
+          },
+          "chatId": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Optional chat id, \"last\", or part of a chat title."
+          },
+          "chat": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Optional chat title such as 小窝."
+          }
+        }
+      },
+      "summary": {
+        "zh": "通过 Telegram bot 发一句话、一张本机图片，或一份本机文件（pdf / md / word / ppt 等，限允许的目录）。",
+        "en": "Send a line, a local image, or local documents on Telegram, from the allowed directories."
+      }
+    },
+    {
+      "name": "tg_send_sticker",
+      "tags": [
+        "speak"
+      ],
+      "description": "Send a sticker the bot has seen to a Telegram chat. Every sticker that arrives is saved on this machine; tg_stickers lists them with a #number handle. sticker takes that handle (#3 or 3), a file id, a set name, or an emoji; omit it to send the newest saved one. chatId or chat picks the target; with neither it answers the chat that has been waiting longest.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "sticker": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Handle (#3), file id, set name or emoji; blank sends the newest one."
+          },
+          "chatId": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Optional chat id, \"last\", or part of a chat title."
+          },
+          "chat": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Optional chat title such as 小窝."
+          }
+        }
+      },
+      "summary": {
+        "zh": "把收藏的贴纸发到 Telegram（#编号 / 表情 / 套图名，留空发最新那张）。",
+        "en": "Send a saved sticker on Telegram (by #handle, emoji or set name; blank sends the newest)."
+      }
+    },
+    {
+      "name": "tg_stickers",
+      "tags": [
+        "memory"
+      ],
+      "description": "List the stickers saved from Telegram chats, newest first: handle, emoji, type, set name, how often it was seen and its size. query filters by emoji, set name or file id.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Optional emoji, set name or file id to filter by."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "How many to list, default 20."
+          }
+        }
+      },
+      "summary": {
+        "zh": "列出从 Telegram 收下来的贴纸（#编号、表情、类型、套图名、出现次数、大小）。",
+        "en": "List the stickers saved from Telegram chats with their handles and metadata."
       }
     }
   ],
@@ -23,8 +136,24 @@
     {
       "type": "telegram.message",
       "description": {
-        "zh": "人在 Telegram 上发来的一条消息（只来自 allow 名单里的会话）。",
-        "en": "One message the person sent on Telegram, from an allow-listed chat only."
+        "zh": "人在 Telegram 上发来的一条消息（只来自 allow 名单里的会话）；群聊和频道会带上名字与 id。",
+        "en": "One message the person sent on Telegram, from an allow-listed chat only; a group or channel carries its title and id."
+      },
+      "trigger": "flush"
+    },
+    {
+      "type": "telegram.unread",
+      "description": {
+        "zh": "群里的未读攒够条数或放够时间后的摘要，只说有多少条，正文用 tg_unread 取。",
+        "en": "A summary once buffered group messages reach a count or an age; the body is read with tg_unread."
+      },
+      "trigger": "flush"
+    },
+    {
+      "type": "telegram.joined",
+      "description": {
+        "zh": "bot 被拉进一个还不在白名单里的会话，带群名和群 id，提示怎么放行。",
+        "en": "The bot was added to a chat that is not on the allow list yet, with its title, id and how to let it in."
       },
       "trigger": "flush"
     }
