@@ -1,6 +1,6 @@
 {
   "name": "cortico-world-telegram",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "type": "module",
   "description": "Cortico / Coopanion World: talk to your desktop pet through a Telegram bot (official Bot API, long polling). Consecutive messages merged into one wake, many chats at once, stickers, documents, owner-only commands, allow-listed chats, no webhook or public port.",
   "author": "BigFatWhale",

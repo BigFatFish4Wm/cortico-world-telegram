@@ -6,9 +6,15 @@
  * never dropped: a failed `onFlush` puts its messages back in front of anything that arrived
  * meanwhile, and the next idle tick tries again.
  *
+ * Batch clocks come from each item's `at` (when the update arrived), not from when `enqueue` was
+ * called, so a slow attachment download cannot stretch the gap between two messages of one burst.
+ *
  * The maximum wait is not a second timer. Every arm takes the earlier of
  * `lastAt + windowMs` and `firstAt + maxWaitMs`, so new messages can postpone the flush by at
  * most `maxWaitMs - (now - firstAt)`; a stream that never goes quiet still flushes on time.
+ *
+ * The four limits may be passed as numbers or as functions; a function is resolved on every use,
+ * which is what lets the World's settings take effect without rebuilding the batcher.
  */
 
 const DEFAULT_WINDOW_MS = 1000
@@ -21,24 +27,47 @@ export class MessageBatcher {
   /**
    * @param {object} options
    * @param {(key: string, items: unknown[]) => Promise<void>} options.onFlush
-   * @param {number} [options.windowMs] idle gap that closes a batch
-   * @param {number} [options.maxWaitMs] hard deadline counted from a batch's first message
-   * @param {number} [options.maxMessages]
-   * @param {number} [options.maxChars] cap on the text a batch may carry
-   * @param {number} [options.maxBytes] cap on attachment bytes a batch may hold
+   * @param {number|(() => number)} [options.windowMs] idle gap that closes a batch
+   * @param {number|(() => number)} [options.maxWaitMs] hard deadline counted from a batch's first message
+   * @param {number|(() => number)} [options.maxMessages]
+   * @param {number|(() => number)} [options.maxChars] cap on the text a batch may carry
+   * @param {number|(() => number)} [options.maxBytes] cap on attachment bytes a batch may hold
    * @param {{ warn?: (line: string) => void }} [options.log]
    */
   constructor(options = {}) {
-    this.windowMs = positive(options.windowMs, DEFAULT_WINDOW_MS)
-    this.maxWaitMs = Math.max(this.windowMs, positive(options.maxWaitMs, DEFAULT_MAX_WAIT_MS))
-    this.maxMessages = Math.max(1, Math.round(positive(options.maxMessages, DEFAULT_MAX_MESSAGES)))
-    this.maxChars = Math.max(1, Math.round(positive(options.maxChars, DEFAULT_MAX_CHARS)))
-    this.maxBytes = positive(options.maxBytes, DEFAULT_MAX_BYTES)
+    this.opts = options
     this.onFlush = options.onFlush
     this.log = options.log ?? {}
     /** conversation key → batch state; see `createState`. */
     this.batches = new Map()
     this.stopped = false
+  }
+
+  /** A limit, read fresh on every use so a settings change applies at the next message. */
+  num(name, fallback) {
+    const raw = this.opts[name]
+    const value = Number(typeof raw === 'function' ? raw() : raw)
+    return Number.isFinite(value) && value > 0 ? value : fallback
+  }
+
+  get windowMs() {
+    return this.num('windowMs', DEFAULT_WINDOW_MS)
+  }
+
+  get maxWaitMs() {
+    return Math.max(this.windowMs, this.num('maxWaitMs', DEFAULT_MAX_WAIT_MS))
+  }
+
+  get maxMessages() {
+    return Math.max(1, Math.round(this.num('maxMessages', DEFAULT_MAX_MESSAGES)))
+  }
+
+  get maxChars() {
+    return Math.max(1, Math.round(this.num('maxChars', DEFAULT_MAX_CHARS)))
+  }
+
+  get maxBytes() {
+    return this.num('maxBytes', DEFAULT_MAX_BYTES)
   }
 
   /** How many conversations currently hold unsent messages. */
@@ -60,7 +89,7 @@ export class MessageBatcher {
 
     if (urgent) {
       await this.flush(key)
-      const single = this.createState(key)
+      const single = this.createState(key, arrivalOf(item))
       this.add(single, item, weight)
       this.batches.set(key, single)
       await this.flush(key)
@@ -69,7 +98,7 @@ export class MessageBatcher {
 
     let state = this.batches.get(key)
     if (!state) {
-      state = this.createState(key)
+      state = this.createState(key, arrivalOf(item))
       this.batches.set(key, state)
     }
     this.add(state, item, weight)
@@ -82,21 +111,20 @@ export class MessageBatcher {
     return true
   }
 
-  createState(key) {
-    const at = Date.now()
+  createState(key, at) {
     return { key, items: [], chars: 0, bytes: 0, firstAt: at, lastAt: at, timer: null, flushing: false }
   }
 
   add(state, item, weight) {
     state.items.push(item)
-    state.lastAt = Date.now()
-    state.chars += String(item?.body ?? '').length
+    state.lastAt = Math.max(state.lastAt, arrivalOf(item))
+    state.chars += Number(item?.chars) || String(item?.body ?? '').length
     state.bytes += Math.max(0, Number(weight) || 0)
   }
 
   /** One timer per batch, re-aimed on every message but never past the batch's hard deadline. */
   arm(state) {
-    if (this.stopped) return
+    if (this.stopped || state.flushing) return
     this.clearTimer(state)
     const deadline = Math.min(state.lastAt + this.windowMs, state.firstAt + this.maxWaitMs)
     state.timer = setTimeout(() => {
@@ -166,7 +194,8 @@ export class MessageBatcher {
   }
 }
 
-function positive(value, fallback) {
-  const number = Number(value)
-  return Number.isFinite(number) && number > 0 ? number : fallback
+/** When the update reached the World; `enqueue` time stands in when the item carries none. */
+function arrivalOf(item) {
+  const at = Number(item?.at)
+  return Number.isFinite(at) && at > 0 ? at : Date.now()
 }

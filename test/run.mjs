@@ -18,12 +18,17 @@ function startFakeTelegram() {
   const pending = []
   let waiter = null
   const receivedPaths = []
-  const state = { rejectStickerFileId: false, rejectStickerUpload: false }
+  const state = { rejectStickerFileId: false, rejectStickerUpload: false, fileDelayMs: 0 }
 
   const server = http.createServer((req, res) => {
     if (req.url.startsWith('/file/bot')) {
-      res.setHeader('content-type', 'image/jpeg')
-      res.end(Buffer.from([0xff, 0xd8, 0xff, 0xd9]))
+      const send = () => {
+        res.setHeader('content-type', 'image/jpeg')
+        res.end(Buffer.from([0xff, 0xd8, 0xff, 0xd9]))
+      }
+      // 可配置的下载延迟：用来证明慢下载不会把连发的间隔撑开
+      if (state.fileDelayMs > 0) setTimeout(send, state.fileDelayMs)
+      else send()
       return
     }
     const chunks = []
@@ -1139,6 +1144,70 @@ assert.equal(events10(), before15 + 1, 'stop 时把攒的合并发出去')
 assert.equal(host10.events[before15].meta.count, 2)
 
 server10.close()
+
+// ---- 主人私聊连发同一张贴纸：下载比连发间隔还慢，也应该只叫醒一次 ----
+const server11 = await startFakeTelegram()
+const apiBase11 = `http://127.0.0.1:${server11.address().port}`
+// 模拟真实情况：附件下载 1.5s，远慢于 0.25s 的连发间隔
+server11.state.fileDelayMs = 1500
+const world11 = new TelegramWorld({
+  cfg: {
+    enabled: true,
+    token: TOKEN,
+    owner: CHAT_ID,
+    guestMode: '朋友可聊天',
+    allow: CHAT_ID,
+    replyChat: '',
+    mergeWindowMs: 1000,
+    mergeMaxWaitMs: 3000,
+    mergeMaxMessages: 8,
+    mergeMaxChars: 2400,
+    apiBase: apiBase11,
+  },
+  ctx: { dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'tg-world11-')) },
+})
+const host11 = fakeHost()
+await world11.start(host11)
+
+const stickerOf = (id, unique) => ({
+  file_id: id,
+  file_unique_id: unique,
+  type: 'regular',
+  width: 512,
+  height: 512,
+  is_animated: false,
+  is_video: false,
+  emoji: '🤣',
+  set_name: 'Cats',
+  thumbnail: { file_id: `${id}_thumb`, file_unique_id: `${unique}_thumb`, width: 320, height: 320, file_size: 18794 },
+})
+let seq11 = 900
+const pushSticker11 = () => server11.pushUpdate({
+  message_id: seq11++,
+  from: { id: Number(CHAT_ID), is_bot: false, first_name: '阿梦' },
+  chat: { id: Number(CHAT_ID), type: 'private' },
+  date: 1700006000 + seq11,
+  sticker: stickerOf('STK11', 'UNIQ11'),
+})
+
+const t11 = Date.now()
+pushSticker11()
+await settle(250)
+pushSticker11()
+await settle(250)
+pushSticker11()
+await waitFor(() => host11.events.length > 0, '三张贴纸合成一条事件')
+await settle(300)
+
+assert.equal(host11.events.length, 1, '三张贴纸只叫醒一次')
+const burst11 = host11.events[0]
+assert.equal(burst11.meta.count, 3, '三条都在这一条事件里')
+assert.match(burst11.text, /【Telegram 私聊 （连发 3 条）】/)
+assert.equal(burst11.text.split('\n').length, 4, '抬头 + 三行')
+assert.equal(burst11.blobs.length, 3, '每张的字节都在')
+assert.ok(Date.now() - t11 < 6000, '没有为了等下载拖过头')
+await world11.stop()
+server11.close()
 
 // ---- 合并器本身：失败不丢、顺序不乱 ----
 const { MessageBatcher } = await import('../batcher.js')

@@ -102,6 +102,19 @@ function boundedInt(value, min, max, fallback) {
   return Math.max(min, Math.min(max, Math.round(number)))
 }
 
+/** How many bytes a message's attachment will take, from Telegram's own size fields. */
+function estimateMediaBytes(message) {
+  const photo = Array.isArray(message?.photo) ? message.photo.at(-1) : null
+  const size =
+    Number(photo?.file_size) ||
+    Number(message?.sticker?.thumbnail?.file_size) ||
+    Number(message?.sticker?.file_size) ||
+    Number(message?.document?.file_size) ||
+    Number(message?.animation?.thumbnail?.file_size) ||
+    0
+  return Math.max(0, Number.isFinite(size) ? size : 0)
+}
+
 /** The saved asset's extension: `.webp` static, `.tgs` animated, `.webm` video. */
 function stickerExt(kind) {
   return STICKER_EXT_BY_KIND[kind] ?? '.webp'
@@ -669,11 +682,13 @@ export class TelegramWorld {
     }
 
     this.abort = new AbortController()
+    // Limits are handed over as getters so a change in the settings page applies to the next
+    // message instead of needing a World restart.
     this.batcher = new MessageBatcher({
-      windowMs: this.mergeWindowMs,
-      maxWaitMs: this.mergeMaxWaitMs,
-      maxMessages: this.mergeMaxMessages,
-      maxChars: this.mergeMaxChars,
+      windowMs: () => this.mergeWindowMs,
+      maxWaitMs: () => this.mergeMaxWaitMs,
+      maxMessages: () => this.mergeMaxMessages,
+      maxChars: () => this.mergeMaxChars,
       maxBytes: MAX_BATCH_BYTES,
       log: { warn: (line) => host.log.warn(`telegram: ${line}`) },
       onFlush: (chatId, items) => this.emitBatch(chatId, items),
@@ -776,6 +791,8 @@ export class TelegramWorld {
   }
 
   async accept(update) {
+    // Stamped before anything touches the network: the merge window belongs to arrival time.
+    const arrivedAt = Date.now()
     if (update?.my_chat_member) {
       await this.acceptMembership(update.my_chat_member)
       return
@@ -898,70 +915,91 @@ export class TelegramWorld {
       return
     }
 
-    let blobs
-    let label = ''
-    let downloaded = null
-    if (media) {
-      label = media.fallback
-      try {
-        const bytes = await this.downloadMedia(media.fileId)
-        if (bytes) {
-          downloaded = bytes
-          blobs = [{ bytes, mime: media.mime, name: media.name, fallbackText: media.fallback }]
-          this.host?.log.info(`telegram: 附件 ${media.fallback} 已下载，${bytes.length} 字节（${media.mime}）`)
-        }
-      } catch (error) {
-        this.host?.log.warn(`telegram: 下载${media.fallback}失败：${error.message}`)
-      }
-    }
-    // A sticker also goes into the local collection: its own asset is kept so it can be sent back,
-    // and the label carries the handle to send it by.
-    let sticker = null
-    if (message.sticker) {
-      sticker = await this.saveSticker(message.sticker, chatId, { fileId: media?.fileId, bytes: downloaded })
-      if (sticker) label = this.stickerLabel(sticker)
-    }
-    let body = [label, text].filter(Boolean).join(' ')
-    if (mentionContext) body = `（前文）\n${mentionContext}\n——\n${body}`
-    const quoted = this.quoteOf(message.reply_to_message)
-    const quote = quoted
-      ? `「回复 ${quoted.name}${quoted.fromId === null ? '' : `(id:${quoted.fromId})`}：${quoted.text}」`
-      : ''
     // A group or channel is named so replies can be addressed to it; in a private chat the sender
     // is the chat, and a channel post has no person besides the chat itself.
     const where = isGroup || isChannel ? `「${title}」(${chatId})` : ''
     const speaker = isChannel ? '' : `${sender}（${role}）`
+    const quoted = this.quoteOf(message.reply_to_message)
+    const sentAt = Number(message.date)
+    const clock = Number.isFinite(sentAt) && sentAt > 0
+      ? new Date(sentAt * 1000).toTimeString().slice(0, 8)
+      : ''
 
     this.host?.log.info(
-      `telegram: 收到 ${kind}${where ? ` ${title}(${chatId})` : ''} ${sender}（${role}）${quoted ? ' [回复]' : ''}：${(text || label).slice(0, 40)}`,
+      `telegram: 收到 ${kind}${where ? ` ${title}(${chatId})` : ''} ${sender}（${role}）${quoted ? ' [回复]' : ''}${clock ? ` [发送 ${clock}]` : ''}：${(text || media?.fallback || '').slice(0, 40)}`,
     )
 
-    await this.enqueueMessage(
-      chatId,
-      {
-        ts: new Date().toISOString(),
-        messageId: message.message_id ?? null,
-        kind,
-        where,
-        speaker,
-        body,
-        quote,
-        quoted,
-        blobs,
-        chatTitle: isGroup || isChannel ? title : null,
-        fromId,
-        fromName: who,
-        fromUsername: message.from?.username ?? null,
-        role: owner ? 'owner' : 'guest',
-        hasMedia: Boolean(media),
-        sticker: sticker ? `#${sticker.seq}` : undefined,
-      },
-      {
-        // A mention or an owner command is answered on its own, right after what came before it.
-        urgent: mention || ownerCommand,
-        weight: (blobs ?? []).reduce((sum, blob) => sum + blob.bytes.length, 0),
-      },
-    )
+    const item = {
+      // The merge window counts from arrival, not from the end of the attachment download.
+      at: arrivedAt,
+      ts: new Date().toISOString(),
+      messageId: message.message_id ?? null,
+      kind,
+      where,
+      speaker,
+      body: '',
+      quote: '',
+      quoted: undefined,
+      blobs: undefined,
+      chars: text.length,
+      chatTitle: isGroup || isChannel ? title : null,
+      fromId,
+      fromName: who,
+      fromUsername: message.from?.username ?? null,
+      role: owner ? 'owner' : 'guest',
+      hasMedia: Boolean(media),
+      sticker: undefined,
+    }
+    // Bytes and the sticker index entry land here; a batch waits for them at flush time.
+    item.ready = this.prepareMessage(message, item, { media, text, mentionContext, chatId, quoted })
+
+    await this.enqueueMessage(chatId, item, {
+      // A mention or an owner command is answered on its own, right after what came before it.
+      urgent: mention || ownerCommand,
+      weight: estimateMediaBytes(message),
+    })
+  }
+
+  /**
+   * Fills in what a message needs the network for: its attachment bytes and, for a sticker, the
+   * local collection entry whose handle goes into the text. Runs while the merge window is already
+   * open, and never rejects — a failed download leaves the message deliverable without the bytes.
+   */
+  async prepareMessage(message, item, { media, text, mentionContext, chatId, quoted }) {
+    let label = media?.fallback ?? ''
+    const quote = quoted
+      ? `「回复 ${quoted.name}${quoted.fromId === null ? '' : `(id:${quoted.fromId})`}：${quoted.text}」`
+      : ''
+    let blobs
+    try {
+      if (media) {
+        const bytes = await this.downloadMedia(media.fileId)
+        if (bytes) {
+          blobs = [{ bytes, mime: media.mime, name: media.name, fallbackText: media.fallback }]
+          this.host?.log.info(`telegram: 附件 ${media.fallback} 已下载，${bytes.length} 字节（${media.mime}）`)
+        }
+      }
+      // A sticker also goes into the local collection: its own asset is kept so it can be sent back,
+      // and the label carries the handle to send it by.
+      if (message.sticker) {
+        const sticker = await this.saveSticker(message.sticker, chatId, {
+          fileId: media?.fileId,
+          bytes: blobs?.[0]?.bytes,
+        })
+        if (sticker) {
+          label = this.stickerLabel(sticker)
+          item.sticker = `#${sticker.seq}`
+        }
+      }
+    } catch (error) {
+      this.host?.log.warn(`telegram: ${media?.fallback ?? '附件'}处理失败：${error.message}`)
+    }
+    let body = [label, text].filter(Boolean).join(' ')
+    if (mentionContext) body = `（前文）\n${mentionContext}\n——\n${body}`
+    item.body = body
+    item.quote = quote
+    item.quoted = quoted ?? undefined
+    item.blobs = blobs
   }
 
   /** Hands one message to its chat's batcher; with merging off it goes straight out as an event. */
@@ -986,6 +1024,9 @@ export class TelegramWorld {
    */
   async emitBatch(chatId, items) {
     if (!items.length) return
+    // The window may close before an attachment finished downloading; wait for it here so an event
+    // never goes out missing the bytes that belong to it.
+    await Promise.allSettled(items.map((item) => item.ready).filter(Boolean))
     const first = items[0]
     const last = items[items.length - 1]
     const count = items.length
@@ -1991,32 +2032,32 @@ export class TelegramWorld {
                 title: '合并静默窗（毫秒）',
                 minimum: 50,
                 maximum: 10000,
-                'x-hot': false,
-                description: '最后一条消息之后等这么久没新消息就发；默认 1000。改完要重启 World。',
+                'x-hot': true,
+                description: '最后一条消息之后等这么久没新消息就发；默认 1000，改完下一条消息即生效。连发间隔比它长就合不上，调大即可。',
               },
               [at('mergeMaxWaitMs')]: {
                 type: 'integer',
                 title: '合并最长等待（毫秒）',
                 minimum: 100,
                 maximum: 60000,
-                'x-hot': false,
-                description: '一直有人在发也不能无限等：从这批第一条开始算，到点就发；默认 3000，不会小于静默窗。',
+                'x-hot': true,
+                description: '一直有人在发也不能无限等：从这批第一条开始算，到点就发；默认 3000，不会小于静默窗。即时生效。',
               },
               [at('mergeMaxMessages')]: {
                 type: 'integer',
                 title: '一批最多几条',
                 minimum: 2,
                 maximum: 50,
-                'x-hot': false,
-                description: '默认 8；攒到这么多立刻发，不再等静默窗。',
+                'x-hot': true,
+                description: '默认 8；攒到这么多立刻发，不再等静默窗。即时生效。',
               },
               [at('mergeMaxChars')]: {
                 type: 'integer',
                 title: '一批正文最多多少字',
                 minimum: 200,
                 maximum: 40000,
-                'x-hot': false,
-                description: '默认 2400；到量立刻发，免得一条事件把上下文撑爆。',
+                'x-hot': true,
+                description: '默认 2400；到量立刻发，免得一条事件把上下文撑爆。即时生效。',
               },
               [at('unreadMode')]: {
                 type: 'string',
